@@ -1,38 +1,38 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
   <channel>
-    <title>PaperMod</title>
-    <link>http://localhost:1313/hugo-PaperMod/</link>
-    <description>Recent content on PaperMod</description>
+    <title>Yiwyn的知识库 ~慎知</title>
+    <link>http://localhost:1313/</link>
+    <description>Recent content on Yiwyn的知识库 ~慎知</description>
     <image>
-      <title>PaperMod</title>
-      <url>http://localhost:1313/hugo-PaperMod/images/papermod-cover.png</url>
-      <link>http://localhost:1313/hugo-PaperMod/images/papermod-cover.png</link>
+      <title>Yiwyn的知识库 ~慎知</title>
+      <url>http://localhost:1313/images/papermod-cover.png</url>
+      <link>http://localhost:1313/images/papermod-cover.png</link>
     </image>
     <generator>Hugo -- 0.131.0</generator>
-    <language>en</language>
+    <language>zh</language>
     <copyright>PaperMod Contributors</copyright>
     <lastBuildDate>Sat, 28 Sep 2024 19:23:15 +0800</lastBuildDate>
-    <atom:link href="http://localhost:1313/hugo-PaperMod/index.xml" rel="self" type="application/rss+xml" />
+    <atom:link href="http://localhost:1313/index.xml" rel="self" type="application/rss+xml" />
     <item>
       <title>Helloword</title>
-      <link>http://localhost:1313/hugo-PaperMod/helloword/</link>
+      <link>http://localhost:1313/helloword/</link>
       <pubDate>Sat, 28 Sep 2024 19:23:15 +0800</pubDate>
-      <guid>http://localhost:1313/hugo-PaperMod/helloword/</guid>
+      <guid>http://localhost:1313/helloword/</guid>
       <description>创建文件测试</description>
     </item>
     <item>
       <title>HelloHugo</title>
-      <link>http://localhost:1313/hugo-PaperMod/hellohugo/</link>
+      <link>http://localhost:1313/hellohugo/</link>
       <pubDate>Sat, 28 Sep 2024 19:12:15 +0800</pubDate>
-      <guid>http://localhost:1313/hugo-PaperMod/hellohugo/</guid>
+      <guid>http://localhost:1313/hellohugo/</guid>
       <description></description>
     </item>
     <item>
       <title>Code Syntax Guide</title>
-      <link>http://localhost:1313/hugo-PaperMod/posts/code_syntax/</link>
+      <link>http://localhost:1313/posts/code_syntax/</link>
       <pubDate>Sun, 10 Mar 2019 00:00:00 +0000</pubDate>
-      <guid>http://localhost:1313/hugo-PaperMod/posts/code_syntax/</guid>
+      <guid>http://localhost:1313/posts/code_syntax/</guid>
       <description>Sample article showcasing basic code syntax and formatting for HTML elements.</description>
     </item>
   </channel>

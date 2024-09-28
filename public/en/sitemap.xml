@@ -2,88 +2,88 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
   xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
-    <loc>http://localhost:1313/hugo-PaperMod/helloword/</loc>
+    <loc>http://localhost:1313/helloword/</loc>
     <lastmod>2024-09-28T19:23:15+08:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/</loc>
+    <loc>http://localhost:1313/</loc>
     <lastmod>2024-09-28T19:23:15+08:00</lastmod>
     <xhtml:link
                 rel="alternate"
                 hreflang="fr"
-                href="http://localhost:1313/hugo-PaperMod/fr/"
+                href="http://localhost:1313/fr/"
                 />
     <xhtml:link
                 rel="alternate"
                 hreflang="fa"
-                href="http://localhost:1313/hugo-PaperMod/fa/"
+                href="http://localhost:1313/fa/"
                 />
     <xhtml:link
                 rel="alternate"
                 hreflang="en"
-                href="http://localhost:1313/hugo-PaperMod/"
+                href="http://localhost:1313/"
                 />
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/hellohugo/</loc>
+    <loc>http://localhost:1313/hellohugo/</loc>
     <lastmod>2024-09-28T19:12:15+08:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/categories/</loc>
+    <loc>http://localhost:1313/categories/</loc>
     <lastmod>2019-03-10T00:00:00+00:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/tags/code/</loc>
+    <loc>http://localhost:1313/tags/code/</loc>
     <lastmod>2019-03-10T00:00:00+00:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/posts/code_syntax/</loc>
+    <loc>http://localhost:1313/posts/code_syntax/</loc>
     <lastmod>2019-03-10T00:00:00+00:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/tags/gist/</loc>
+    <loc>http://localhost:1313/tags/gist/</loc>
     <lastmod>2019-03-10T00:00:00+00:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/tags/markdown/</loc>
+    <loc>http://localhost:1313/tags/markdown/</loc>
     <lastmod>2019-03-10T00:00:00+00:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/posts/</loc>
+    <loc>http://localhost:1313/posts/</loc>
     <lastmod>2019-03-10T00:00:00+00:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/series/</loc>
+    <loc>http://localhost:1313/series/</loc>
     <lastmod>2019-03-10T00:00:00+00:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/tags/syntax/</loc>
+    <loc>http://localhost:1313/tags/syntax/</loc>
     <lastmod>2019-03-10T00:00:00+00:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/categories/syntax/</loc>
+    <loc>http://localhost:1313/categories/syntax/</loc>
     <lastmod>2019-03-10T00:00:00+00:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/tags/</loc>
+    <loc>http://localhost:1313/tags/</loc>
     <lastmod>2019-03-10T00:00:00+00:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/categories/themes/</loc>
+    <loc>http://localhost:1313/categories/themes/</loc>
     <lastmod>2019-03-10T00:00:00+00:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/series/themes-guide/</loc>
+    <loc>http://localhost:1313/series/themes-guide/</loc>
     <lastmod>2019-03-10T00:00:00+00:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/archives/</loc>
+    <loc>http://localhost:1313/archives/</loc>
     <xhtml:link
                 rel="alternate"
                 hreflang="fr"
-                href="http://localhost:1313/hugo-PaperMod/fr/archives/"
+                href="http://localhost:1313/fr/archives/"
                 />
     <xhtml:link
                 rel="alternate"
                 hreflang="en"
-                href="http://localhost:1313/hugo-PaperMod/archives/"
+                href="http://localhost:1313/archives/"
                 />
   </url><url>
-    <loc>http://localhost:1313/hugo-PaperMod/search/</loc>
+    <loc>http://localhost:1313/search/</loc>
     <xhtml:link
                 rel="alternate"
                 hreflang="fr"
-                href="http://localhost:1313/hugo-PaperMod/fr/search/"
+                href="http://localhost:1313/fr/search/"
                 />
     <xhtml:link
                 rel="alternate"
                 hreflang="en"
-                href="http://localhost:1313/hugo-PaperMod/search/"
+                href="http://localhost:1313/search/"
                 />
   </url>
 </urlset>
