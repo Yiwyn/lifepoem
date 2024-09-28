@@ -38,7 +38,7 @@ languages:
           weight: 10
         - name: 标签
           pageRef: tags/
-          weight: 10
+          weight: 15
         - name: 搜索
           pageRef: search/
           weight: 20
