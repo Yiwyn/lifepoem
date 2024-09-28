@@ -1,6 +1,5 @@
 ---
-menus: main
-title: "关于"
+Title: "关于"
 layout: "about"
 summary: about
 ---

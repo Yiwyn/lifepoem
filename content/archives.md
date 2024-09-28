@@ -1,6 +1,5 @@
 ---
-menus: main
-title: "归档"
+Title: "归档"
 layout: "archives"
 summary: archives
 ---
