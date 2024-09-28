@@ -1,6 +1,6 @@
 baseURL: "https://me.lifepoem.fun/" # 主站的 URL
 title: Yiwyn's ~ShenZhi Blog # 站点标题
-copyright: "[©2024 SonnyCalcr's Blog](https://sonnycalcr.github.io/)" # 网站的版权声明，通常显示在页脚
+copyright: "[©2024 Yiwyn's ~ShenZhi Blog](https://github.com/Yiwyn/lifepoem/)" # 网站的版权声明，通常显示在页脚
 theme: PaperMod # 主题
 languageCode: zh-cn # 语言
 
