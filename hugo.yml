@@ -17,7 +17,6 @@ defaultContentLanguageInSubdir: false # 是否要在地址栏加上默认的语�
 
 
 
-
 languages:
   zh:
     languageName: "中文" # 展示的语言名
@@ -48,12 +47,37 @@ languages:
           weight: 21
 
 
-# https://github.com/adityatelange/hugo-PaperMod/wiki/Features#search-page
-outputs:
-  home:
-    - HTML # 生成的静态页面
-    - RSS # 这个其实无所谓
-    - JSON # necessary for search, 这里的配置修改好之后，一定要重新生成一下
+
+
+params:
+  env: production # to enable google analytics, opengraph, twitter-cards and schema.
+  description: "Theme PaperMod - https://github.com/adityatelange/hugo-PaperMod"
+  author: Yiwyn
+  # author: ["Me", "You"] # multiple authors
+  defaultTheme: auto
+  # disableThemeToggle: true
+  ShowShareButtons: false
+  ShowReadingTime: true
+  # disableSpecial1stPost: true
+  displayFullLangName: true
+  ShowPostNavLinks: true
+  ShowBreadCrumbs: true
+  ShowCodeCopyButtons: true
+  ShowRssButtonInSectionTermList: true
+  ShowAllPagesInArchive: true
+  ShowPageNums: true
+  ShowToc: true
+  comments: true
+  images: ["images/papermod-cover.png"]
+
+
+  homeInfoParams:
+    Title: "Hey ~"
+    Content: >
+      👋 Welcome!.
+
+
+
 
 
 
@@ -97,3 +121,14 @@ params:
       favicon32x32: "favicon.png"
       apple_touch_icon: "favicon.png"
       safari_pinned_tab: "favicon.png"
+
+
+
+# https://github.com/adityatelange/hugo-PaperMod/wiki/Features#search-page
+outputs:
+  home:
+    - HTML # 生成的静态页面
+    - RSS # 这个其实无所谓
+    - JSON # necessary for search, 这里的配置修改好之后，一定要重新生成一下
+
+
