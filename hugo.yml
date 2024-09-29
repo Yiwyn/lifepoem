@@ -1,7 +1,7 @@
 baseURL: "https://me.lifepoem.fun/" # 主站的 URL
 title: Yiwyn's ~ShenZhi Blog # 站点标题
 copyright: "[©2024 Yiwyn's ~ShenZhi Blog](https://github.com/Yiwyn/lifepoem/)" # 网站的版权声明，通常显示在页脚
-theme: [PaperMod] # 主题
+theme: PaperMod # 主题
 languageCode: zh-cn # 语言
 
 enableInlineShortcodes: true # shortcode，类似于模板变量，可以在写 markdown 的时候便捷地插入，官方文档中有一个视频讲的很通俗
@@ -14,7 +14,7 @@ enableEmoji: true # 允许 emoji
 pygmentsUseClasses: true
 defaultContentLanguage: zh # 顶部首先展示的语言界面
 defaultContentLanguageInSubdir: false # 是否要在地址栏加上默认的语言代码
-mainsections: ["posts", "papermod"]
+
 
 
 languages:
@@ -47,8 +47,6 @@ languages:
           weight: 21
 
 
-
-
 params: 
   env: production # to enable google analytics, opengraph, twitter-cards and schema.
   description: "Theme PaperMod - https://github.com/adityatelange/hugo-PaperMod"
@@ -74,7 +72,7 @@ params:
   homeInfoParams:
     Title: "Hey ~"
     Content: >
-      👋 Welcome!.
+      👋 Welcome! 本服务挂载在CloudFlare Pages.作为本人记录日常学习，生活所用。
 
 
 
