@@ -4,4 +4,13 @@ layout: "about"
 summary: about
 ---
 
-这里就可以写一些关于的相关信息了。
+🐱
+我是一个很渺小的人，
+        很无聊的人，
+            希望能看到更多的风景，看到更大的世界，我会努力的让自己变强。
+
+
+
+
+###        努力让自己成为别人的骄傲！
+####       Strive to make yourself someone else's pride.
