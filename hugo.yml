@@ -77,8 +77,9 @@ params:
   homeInfoParams:
     Title: "Hey ~"
     Content: >
-      👋 Welcome! 本服务挂载在CloudFlare Pages.作为本人记录日常学习，生活所用。
-
+      👋 Welcome! 本服务挂载在CloudFlare Pages.
+            作为笔者记录日常学习，生活所用。
+              若有不足之处，请不吝赐教。
 
 
   # 搜索
