@@ -1,4 +1,4 @@
-baseURL: "https://me.lifepoem.fun/" # 主站的 URL
+baseURL: "https://blog.lifepoem.fun/" # 主站的 URL
 title: Yiwyn's ~ShenZhi Blog # 站点标题
 copyright: "[©2024 Yiwyn's ~ShenZhi Blog](https://github.com/Yiwyn/lifepoem/)" # 网站的版权声明，通常显示在页脚
 theme: PaperMod # 主题
@@ -77,8 +77,8 @@ params:
   homeInfoParams:
     Title: "Hey ~"
     Content: >
-      👋 Welcome! 本服务挂载在CloudFlare Pages.
-            作为笔者记录日常学习，生活所用。
+      👋 Welcome! 本服务挂载在CloudFlare Pages.</br>
+            作为笔者记录日常学习，生活所用。</br>
               若有不足之处，请不吝赐教。
 
 
