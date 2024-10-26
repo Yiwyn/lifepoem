@@ -14,6 +14,32 @@ tags = ["架构评估","ATAM"]
 
 
 
+##### 基本概念
+
+ATAM方法是在SAAM方法基础上发展起来的，主要针对<font color='red'>性能、可用性、安全性、可修改性</font>，在系统开发之前，对这些只来你属性进行评估和折中
+
+
+
+
+
+##### <font color='red'>ATAM方法采用效用树（Utility tree）</font>
+
+ATAM方法采用效用树工进行分类和优先级排序。
+
+效用树的结构包括：
+
+<font color='red'>树根-质量属性-属性分类-质量属性场景（叶子节点）</font>
+
+ATAM方法主要关注4类质量属性：<font color='red'>性能、安全性、可修改性、可用性</font>
+
+得到初始效用树后，需要对<font color='red'>场景</font>按重要性给定优先级（H/M/L的形式），再按场景实现的难易度来确定优先级（H/M/L的形式）
+
+
+
+
+
+---
+
 
 
 ![image-20241016134025682](https://filestore.lifepoem.fun/know/202410161340737.png)
