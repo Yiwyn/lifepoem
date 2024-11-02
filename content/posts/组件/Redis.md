@@ -44,6 +44,24 @@ tags = ["Redis"]
 
 
 
+##### 内存淘汰策略
+
+<font color='orange'>volatile-lru</font>（Least Recently Used，最近最少使用）：仅在设置了过期时间的键中，基于LRU算法淘汰数据
+
+<font color='orange'>volatile-lfu</font>（Least Frequently Used，最不经常使用）：仅在设置了过期时间的键中，基于LFU算法淘汰数据
+
+<font color='orange'>volatile-random</font>（随机数据）：仅在设置了过期时间的键中，随机淘汰
+
+<font color='orange'>volatile-ttl</font>（ttl最小的数据）：仅在设置了过期时间的键中，淘汰TTL最小的键，也就是即将过期的键
+
+<font color='orange'>allkeys-lru</font>：在所有的键中，基于LRU算法淘汰数据
+
+<font color='orange'>allkeys-lfu</font>：在所有的键中，基于LFU算法淘汰数据
+
+<font color='orange'>allkeys-random</font>：在所有的键中，随机选择淘汰
+
+
+
 
 
 ##### 数据恢复
