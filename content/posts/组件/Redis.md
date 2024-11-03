@@ -44,6 +44,18 @@ tags = ["Redis"]
 
 
 
+
+
+##### 过期数据删除策略
+
+（1）<font color='red'>惰性删除</font> 只会在取出key的时候才对数据进行过期检查。这样对CPU最友好，但是可能会造成太多过期key没有删除
+
+（2）<font color='red'>定期删除</font> 每隔一段时间抽取一批key执行删除过期key操作。并且，Redis底层会通过限制删除操作执行的时长和频率来减少删除对CPU时间的影响。
+
+
+
+
+
 ##### 内存淘汰策略
 
 <font color='orange'>volatile-lru</font>（Least Recently Used，最近最少使用）：仅在设置了过期时间的键中，基于LRU算法淘汰数据
