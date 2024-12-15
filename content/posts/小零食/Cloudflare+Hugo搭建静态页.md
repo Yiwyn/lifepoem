@@ -74,6 +74,26 @@ hugo使用go语言开发的，大量文章下相比于其他TS(JS)之类的方�
 
 以下将简单描述hugo的使用。
 
+hugo下载地址[Releases · gohugoio/hugo](https://github.com/gohugoio/hugo/releases/)
+
+hugo官网快速开始[Quick start | Hugo](https://gohugo.io/getting-started/quick-start/)
+
+
+
+```powershell
+# 创建站点
+hugo new site quickstart
+
+# 添加主题【示例添加ananke主题，且hugo项目处于git中】
+git submodule add https://github.com/theNewDynamic/gohugo-theme-ananke.git themes/ananke
+
+# 编辑hugo配置文件
+quickstart/hugo.toml
+
+```
+
+
+
 
 
 
