@@ -36,11 +36,47 @@ draft = true
 
 ###### Cloudflare Pages
 
+> [Cloudflare Pages documentation · Cloudflare Pages docs](https://developers.cloudflare.com/pages/)
 
+创建可立即部署到 Cloudflare 全球网络的全栈应用程序。
+
+Pages 服务可以将我们的静态网页挂载到对应的服务上，同时并提供域名以提供访问。【可以理解为nginx中指向index.html中的那种模式】，通过将静态文件上传到指定的位置，达成Pages的构建。
+
+![image-20241214231229774](https://filestore.lifepoem.fun/know/202412142312869.png)
+
+
+
+举个例子，个人主页、个人博客、产品展示、软件文档等
+
+根据文章首页的信息，我们来设想一个工作状态，如我想要做一个博客。
+
+- 我需要写文章，并可以很方便的进行更新
+  - 写文章：使用本地文本编辑工具（MarkDown编辑器之类），
+  - 更新：~~不会有程序员不知道Git吧，不会吧不会吧~~  这里我使用Git进行版本控制，将文章放到gitee和github上。
+- 我如何将我的文章都处理成静态网页文件呢
+  - 其实市面上成熟的方案很多 VuePress、Hexo、Jeklly 、hugo，该类方案大多是以markdown为中心，将markdown文章渲染为静态文件（html、css、js）等形式进行生成，并提供部署方案，下文将重点描述hugo
+- 如何部署
+  - 关于部署，就有的说了，但是我们正常情况下不会搞一个服务器专门放这个；所以选择Pages服务托管，使用Cloudflare综合了以下考量
+    -  费用问题，费用问题是头等问题。Pages上的静态资源是免费的，且无数量限制。![image-20241214233007285](https://filestore.lifepoem.fun/know/202412142330320.png)
+    - 访问速度，这也是选择cloudflare的重要原因之一，Github Pages 打开速度简单折磨
+    - 自动化部署，每次更新完文章可以自动部署新文章
+- 以上工作完成就可以快乐的玩耍了，写完文章随手提交，剩下的等系统自动部署发版就行了
 
 
 
 ##### hugo
+
+
+
+> [The world’s fastest framework for building websites | Hugo](https://gohugo.io/) 
+
+hugo使用go语言开发的，大量文章下相比于其他TS(JS)之类的方案效率要高出很多。
+
+以下将简单描述hugo的使用。
+
+
+
+
 
 
 
