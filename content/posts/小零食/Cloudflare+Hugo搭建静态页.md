@@ -42,8 +42,6 @@ draft = true
 
 Pages 服务可以将我们的静态网页挂载到对应的服务上，同时并提供域名以提供访问。【可以理解为nginx中指向index.html中的那种模式】，通过将静态文件上传到指定的位置，达成Pages的构建。
 
-![image-20241214231229774](https://filestore.lifepoem.fun/know/202412142312869.png)
-
 
 
 举个例子，个人主页、个人博客、产品展示、软件文档等
@@ -85,18 +83,119 @@ hugo官网快速开始[Quick start | Hugo](https://gohugo.io/getting-started/qui
 hugo new site quickstart
 
 # 添加主题【示例添加beautifulhugo主题，且hugo项目处于git中】
-git submodule add https://github.com/halogenica/beautifulhugo.git themes/beautifulhugo
+git submodule add https://github.com/CaiJimmy/hugo-theme-stack.git themes/hugo-theme-stack
 
-# 编辑hugo配置文件
+# 编辑hugo配置文件 - 配置主题
 quickstart/hugo.toml
+
+# 添加文章 执行完成我们就有了第一篇文章
+hugo new content content/posts/my-first-post.md
 
 ```
 
+~~// 可能会踩坑，但是问题不大~~
 
+
+
+当以上步骤完成的时候，我们的静态网站已经初具规模。
+
+以下几点将围绕hugo-theme-stack主题进行展开  <font color='red'>PS：因为这个hugo本身比较简单，所以大部分的工作在主题配置上</font>
+
+因为每个主题都对应有响应的案例站点和源码，我们根据源码来进行配置即可
+
+
+
+###### 接下来我们需要关心的点
+
+1. 侧边栏功能开启，如图
+
+<img src="https://filestore.lifepoem.fun/know/202412162231821.png" alt="image-20241216223147742" style="zoom: 80%;" />
+
+![image-20241216223807436](https://filestore.lifepoem.fun/know/202412162238476.png)
+
+可以看到，我们只需要在项目的content/page下创建指定的文件夹以及文件夹下的index.md即可开启对应的功能
+
+
+
+2. 评估功能的开启
+
+   ![image-20241216224331427](https://filestore.lifepoem.fun/know/202412162243477.png)
+
+可以看到，这里使用gicus项目来实现评论功能，那这些参数是如何获取到的呢
+
+giscus官网奉上 [giscus](https://giscus.app/zh-CN) 
+
+![image-20241216224554475](https://filestore.lifepoem.fun/know/202412162245512.png)
+
+
+
+如图，满足以上规则的仓库即可使用该项功能，这经过一系列的勾选后，我们就可以得到
+
+![image-20241216225939395](https://filestore.lifepoem.fun/know/202412162259445.png)
+
+以上配置完成后，我们进入文章后就能看到giscus提供的评论已经出现了，尝试一点点赞和评论都没有问题![image-20241216230031224](https://filestore.lifepoem.fun/know/202412162300279.png)
+
+
+
+3. 文章的结构
+
+   1. 文章的结论直接决定了网站对于tag、categories的处理
+
+      ```markdown
+      ---
+      title: 测试文章
+      description: 这是一个副标题
+      date: 2020-09-09
+      slug: test-chinese
+      image: https://filestore.lifepoem.fun/know/202412051649426.png
+      categories: ['测试']
+      tags: ['图文']
+      ---
+      
+      ```
+
+      使用该头部信息获取到的具体展示如图
+
+      ![image-20241216230421823](https://filestore.lifepoem.fun/know/202412162304882.png)
+
+
+
+
+
+关于hugo的配置以及主题的配置，不再赘述，可根据demo和官方文档自行尝试自己需要的风格。
 
 
 
 ##### Cloudflare部署
 
+https://dash.cloudflare.com/
 
 
+
+![image-20241214231229774](https://filestore.lifepoem.fun/know/202412142312869.png)
+
+
+
+有两种形式上传方式，正常情况下我们会选择第一种，cloudflare集成了诸多开源项目和工作，如hugo默认是提供了支持的。
+
+第二种方式直接上传源文件的形式，我们可以得到启示，如曾经开发过的vue、react等项目，在build后生成index.html为引的文件，也就说明了我们曾经的一些前端项目是可以很好的进行兼容的（在不方便开源或者不能很好的支持远程打包的那种）
+
+
+
+配置如图
+
+![image-20241216231341534](https://filestore.lifepoem.fun/know/202412162313588.png)
+
+
+
+
+
+![image-20241216231525747](https://filestore.lifepoem.fun/know/202412162315800.png)
+
+
+
+环境变量需要根据实际项目来自行配置。
+
+
+
+保存并部署，大功告成。
