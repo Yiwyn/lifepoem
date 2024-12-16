@@ -84,8 +84,8 @@ hugo官网快速开始[Quick start | Hugo](https://gohugo.io/getting-started/qui
 # 创建站点
 hugo new site quickstart
 
-# 添加主题【示例添加ananke主题，且hugo项目处于git中】
-git submodule add https://github.com/theNewDynamic/gohugo-theme-ananke.git themes/ananke
+# 添加主题【示例添加beautifulhugo主题，且hugo项目处于git中】
+git submodule add https://github.com/halogenica/beautifulhugo.git themes/beautifulhugo
 
 # 编辑hugo配置文件
 quickstart/hugo.toml
@@ -96,9 +96,7 @@ quickstart/hugo.toml
 
 
 
+##### Cloudflare部署
 
 
-
-
-##### Github自动部署
 
