@@ -148,7 +148,17 @@ public interface Function<T, R> {
 
 
 
+productor  extends  &  consumer  super
 
+
+
+? extends T ： T 以及T的子类的可以传入，限定了传入类的上限
+
+? super T : T 以及T的父类可以传入，限定了传入的下限，最大可至Object
+
+
+
+泛型中 <?> <Object> <Type>  如何选择
 
 
 
@@ -157,3 +167,18 @@ public interface Function<T, R> {
 
 
 #### 三 . 泛型的最佳实践
+
+
+
+泛型与Json结合
+
+TypeReference 嵌套泛型
+
+
+
+
+
+
+
+
+
