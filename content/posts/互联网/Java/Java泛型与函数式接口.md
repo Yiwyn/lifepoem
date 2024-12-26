@@ -32,15 +32,91 @@ tags = ["泛型","函数式接口","Lambda"]
 
 - 正确的使用泛型，可以让类型错误在编译阶段暴漏出来，很大程度上可以避免类型转换错误的出现。
 - 因为使用了泛型，指定了类型后对对象的操作更加明确（相较于Map<String,Object>或者List<Object>等）
-- 因为使用了泛型强调了类型的参与，也就意味着代码的参与者中需要实体类参数，在一定程度上起到了规范的作用
+- 因为使用了泛型强调了类型的参与，也就意味着代码的参与者中需要实体类参数，在一定程度上起到了规范的作用，在很大程度上可以提高代码的可修改性和可扩展性
 
 ###### 使用场景
 
-结构比较统一的对象，但是某个字段的类型根据业务不用有所差距
+结构比较统一的对象，但是某个字段的类型根据业务不用有所差距 
+
+- e.g. 1
 
 ```java
-a
+package com.yiwyn.demo.api;
+
+
+import com.yiwyn.demo.domain.User;
+import lombok.Data;
+import java.io.Serializable;
+
+@Data
+public class ApiResposne<T> implements Serializable {
+    private static final long serialVersionUID = -931760054084846347L;
+
+    // 请求状态
+    private int code;
+    // 返回信息
+    private String msg;
+    // 业务数据
+    private T data;
+}
+
+// 使用案例，其中ServiceApi为远程服务
+class Main {
+    public static void main(String[] args) {
+        // 获取用户名
+        ApiResposne<User> apiResposne = UserServiceApi.getUserById("Yiwyn");
+        User data = apiResposne.getData();
+        String username = data.getUsername();
+
+        // 获取错误提示
+        ApiResposne<String> tipResposne = TipServiceApi.getTipsById("ERROR-9527");
+        String tips = tipResposne.getData();
+    }
+}
+
 ```
+
+上述代码中我们可以发现对于data的返回我们是不确定的，但是整体返回的结构我们是确定的，这种场景下我们使用泛型可以让代码更加优雅。
+
+<font color='red'>反面案例</font>
+
+这段代码中最终实现的效果和使用泛型是一致的，代码
+
+```java
+package com.yiwyn.demo.api;
+
+
+import com.yiwyn.demo.domain.User;
+import lombok.Data;
+import java.io.Serializable;
+
+@Data
+public class ApiResposne implements Serializable {
+    private static final long serialVersionUID = -931760054084846347L;
+
+    // 请求状态
+    private int code;
+    // 返回信息
+    private String msg;
+    // 业务数据
+    private Object data;
+    // private Map data;
+}
+
+// 使用案例
+class Main {
+    public static void main(String[] args) {
+        // 获取用户名
+        ApiResposne apiResposne = UserServiceApi.getUserById("Yiwyn");
+        User data = (User) apiResposne.getData();
+        String username = data.getUsername();
+		// Map data = apiResposne.getData();
+		// String username = (String) data.get("username");
+    }
+}
+```
+
+
 
 
 
@@ -67,6 +143,10 @@ public interface Function<T, R> {
 
 
 #### 二 . 泛型的通配符理解
+
+泛型中的通配符 ? 
+
+
 
 
 
