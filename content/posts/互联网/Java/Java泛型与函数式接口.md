@@ -80,7 +80,7 @@ class Main {
 
 <font color='red'>反面案例</font>
 
-这段代码中最终实现的效果和使用泛型是一致的，代码
+这段代码中最终实现的效果和使用泛型是一致的，将类型的转换移到了运行时，增加了风险。
 
 ```java
 package com.yiwyn.demo.api;
@@ -118,9 +118,22 @@ class Main {
 
 
 
+###### 伪泛型、真泛型
+
+首先明确一点，Java使用的是伪泛型，实际类型其实是Object。
+
+
+
+伪泛型：Java中的泛型是伪泛型。泛型只在源码中存在，在编译后的字节码文件中，就已经替换为原来的原生类型（Raw Type，也称裸类型）了，并且在相应的地方插入了强制转型代码。因此，在Java程序的运行期中，ArrayList< Integer>和ArrayList< String >就是同一个类。这种泛型实现方法称为**类型擦除** ，基于这种方法实现的泛型称为**伪泛型**。
+
+
+
+真泛型：泛型无论在源码、编译后还是运行期都是真实存在，例如List< Integer >和List< String >就是两个不同的类型，它们在系统运行期生成，有自己的虚方法表和类型数据，这种实现称为**类型膨胀**，基于这种方法实现的泛型称为**真实泛型**。C#中的泛型就是真实泛型。
+
 
 
 泛型（Generic）常见 T U R 等字母，在Java基础库中 **java.util.function** 函数式接口中，大量使用泛型，可从其中观察到Java官方的泛型定义规范。
+
 - 此处以函数式接口展开泛型的使用，不过多描述函数式接口。
 
 ----------
@@ -144,11 +157,25 @@ public interface Function<T, R> {
 
 #### 二 . 泛型的通配符理解
 
-泛型中的通配符 ? 
+
+
+###### 三种通配符
+
+- 无限定通配符；<?> ，可代表所有的类型
+- 上边界限定通配符；<? extends <font color='cornflowerblue'>Type</font>>，可以传入Type以及Type的子类型
+- 下边界限定通配符；<? super <font color='cornflowerblue'>Type</font>>，可以传入Type以及Type的父类型
 
 
 
-productor  extends  &  consumer  super
+![image-20241227163347248](https://filestore.lifepoem.fun/know/202412271633349.png)
+
+
+
+
+
+
+
+productor  extends   consumer  super
 
 
 
@@ -158,7 +185,7 @@ productor  extends  &  consumer  super
 
 
 
-泛型中 <?> <Object> <Type>  如何选择
+泛型中 <?> < Object > < Type >  如何选择
 
 
 
@@ -166,7 +193,7 @@ productor  extends  &  consumer  super
 -------------
 
 
-#### 三 . 泛型的最佳实践
+#### 三 . 泛型的实践
 
 
 
