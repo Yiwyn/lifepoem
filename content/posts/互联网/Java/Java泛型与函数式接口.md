@@ -31,7 +31,7 @@ tags = ["泛型","函数式接口","Lambda"]
 ###### 为什么推荐使用泛型
 
 - 正确的使用泛型，可以让类型错误在编译阶段暴漏出来，很大程度上可以避免类型转换错误的出现。
-- 因为使用了泛型，指定了类型后对对象的操作更加明确（相较于Map<String,Object>或者List<Object>等）
+- 因为使用了泛型，指定了类型后对对象的操作更加明确（相较于Map< String,Object >或者List< Object >等）
 - 因为使用了泛型强调了类型的参与，也就意味着代码的参与者中需要实体类参数，在一定程度上起到了规范的作用，在很大程度上可以提高代码的可修改性和可扩展性
 
 ###### 使用场景
@@ -161,9 +161,9 @@ public interface Function<T, R> {
 
 ###### 三种通配符
 
-- 无限定通配符；<?> ，可代表所有的类型
-- 上边界限定通配符；<? extends <font color='cornflowerblue'>Type</font>>，可以传入Type以及Type的子类型
-- 下边界限定通配符；<? super <font color='cornflowerblue'>Type</font>>，可以传入Type以及Type的父类型
+- 无限定通配符；< ? > ，可代表所有的类型
+- 上边界限定通配符；< ? extends <font color='cornflowerblue'>Type</font> >，可以传入Type以及Type的子类型
+- 下边界限定通配符；< ? super <font color='cornflowerblue'>Type</font> >，可以传入Type以及Type的父类型
 
 
 
@@ -185,7 +185,7 @@ productor  extends   consumer  super
 
 
 
-泛型中 <?> < Object > < Type >  如何选择
+泛型中 < ? > < Object > < Type >  如何选择
 
 
 
