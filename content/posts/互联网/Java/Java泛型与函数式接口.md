@@ -171,21 +171,90 @@ public interface Function<T, R> {
 
 
 
+###### 通配符使用场景
+
+<font color='red'>Producer Extends, Consumer Super</font>
+
+即，生产者使用 extends，消费者使用super
+
+这里需要理解两个点
+
+- 生产者和消费者如何定义
+
+- 为什么生产者和消费者要区分通配符
 
 
 
+生产者和消费者如何定义
 
-productor  extends   consumer  super
+其中对于生产者和消费者的理解是比较抽象的，要理解这个概念我们选择List进行举例，其中以List为第一人称。
+
+生产者，产出对象，即List产生对象，对应逻辑即是 List.get(index)
+
+消费者，消费对象，即List消费对象，对应逻辑即是 List.add(Element)
+
+```java
+    public static void main(String[] args) {
+       
+        List<Animal> elements = new ArrayList<>();
+        // 这里从elements中获取到了Animal,可以理解为elements作为生产者提供了一个Animal元素
+
+        Animal animal = elements.get(0);
+        // 这里elements添加了一个元素，可以理解为elements消费了一个元素
+        elements.add(new Animal());
+
+    }
+```
+
+以上述为基础，进行扩展PECS概念
+
+```java
+public static void animalDeal(Animal animal) {
+        // 这段代码可以正常执行，在使用super的情况下，对象可以正常进行消费行为
+        List<? super Animal> animals = new ArrayList<>();
+        animals.add(animal);
+
+        // 这段代码使用 animals，animals作为生产者
+        for (Object o : animals) {
+            // 获取到的是Object ?
+        }
 
 
+        // ========================= 华丽的分割线 ===========================
 
-? extends T ： T 以及T的子类的可以传入，限定了传入类的上限
+        // 这段代码会报错，在使用extends的场景中，对象不允许进行消费行为
+        List<? extends Animal> animalsExt = new ArrayList<>();
+        animalsExt.add(animal);
 
-? super T : T 以及T的父类可以传入，限定了传入的下限，最大可至Object
+        // 这段代码使用 animalsExt,animalsExt作为生产者，是可以正常遍历animal元素的，符合producer
+        for (Animal animal1 : animalsExt) {
+            animal1.call();
+        }
+    }
+```
+
+从上述demo中，我们可以得出以下结论
+
+- 在使用super时，对象作为消费者，可以正常的消费对象 
+- 在使用super时，对象作为生产者，获取到的对象是Object，真正使用需要我们强转，实际意义不大
+
+- 在使用extends时，对象作为消费者，不能消费对象 *
+  - 为什么不能消费呢，首先我们可以确定 ? extends Animal ， 可以包含Dog、Cat类，如果可以消费的话，这也就意味着，这个List可以消费Dog、Cat，这个时候就有了问题，List< Dog >和 List< Cat > 可以说是完全不同的两个List，编译器无法确定我们实际给到的列表类型。【本质都是Java的语法约束】
+- 在使用extends时，对象作为生产者，可以正常获取到标识的泛型类型，正常使用
 
 
 
 泛型中 < ? > < Object > < Type >  如何选择
+
+
+
+**具体类型参数**（如 `<String>`）优先级最高，因为它指定了具体的类型。
+
+**通配符**（`<?>`）通常用于类型不明确的场景，具有灵活性但有限制。
+
+**`Object`** 是最宽泛的类型，可以作为一个类型的上限，但通常是最后的选择
+
+~~不写建议直接打死~~
 
 
 
