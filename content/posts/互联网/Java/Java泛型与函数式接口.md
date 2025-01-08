@@ -254,9 +254,7 @@ public static void animalDeal(Animal animal) {
 
 **`Object`** 是最宽泛的类型，可以作为一个类型的上限，但通常是最后的选择
 
-~~不写建议直接打死~~
-
-
+~~不写建议直接打死~~ 不写其实并没有什么问题，默认会使用Object，但是IDE会警告，同时也违背了使用泛型的初衷。
 
 
 
