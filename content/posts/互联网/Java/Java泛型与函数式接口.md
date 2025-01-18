@@ -11,7 +11,7 @@ tags = ["泛型","函数式接口","Lambda"]
 
 
 
-本文主要描述JAVA中泛型和函数式接口的使用，内容为多为个人理解，若有不足之处，请不吝赐教。
+本文主要描述JAVA中泛型和函数式接口的使用，内容为多为个人理解，若有不足之处，请不吝赐教。泛型和函数式接口是Java中非常重要的特性，掌握它们可以帮助我们编写更加灵活和安全的代码。
 
 * 泛型的基本使用
 * 泛型的通配符理解
@@ -33,6 +33,7 @@ tags = ["泛型","函数式接口","Lambda"]
 - 正确的使用泛型，可以让类型错误在编译阶段暴漏出来，很大程度上可以避免类型转换错误的出现。
 - 因为使用了泛型，指定了类型后对对象的操作更加明确（相较于`Map<String,Object>`或者`List<Object>`等）
 - 因为使用了泛型强调了类型的参与，也就意味着代码的参与者中需要实体类参数，在一定程度上起到了规范的作用，在很大程度上可以提高代码的可修改性和可扩展性
+- 我们在做软件工程实践的时候，一直在强调，尽量把风险暴露在前面，能够编译期去检查的错误就不要放在运行期进行检查，Java中泛型出现的概念就是提前去暴露问题暴露风险
 
 ###### 使用场景
 
@@ -126,6 +127,34 @@ class Main {
 
 伪泛型：Java中的泛型是伪泛型。泛型只在源码中存在，在编译后的字节码文件中，就已经替换为原来的原生类型（Raw Type，也称裸类型）了，并且在相应的地方插入了强制转型代码。因此，在Java程序的运行期中，ArrayList< Integer>和ArrayList< String >就是同一个类。这种泛型实现方法称为**类型擦除** ，基于这种方法实现的泛型称为**伪泛型**。
 
+```java
+// 类型擦除示例
+public class Box<T> {
+    private T t;
+
+    public void set(T t) {
+        this.t = t;
+    }
+
+    public T get() {
+        return t;
+    }
+}
+
+// 编译后
+public class Box {
+    private Object t;
+
+    public void set(Object t) {
+        this.t = t;
+    }
+
+    public Object get() {
+        return t;
+    }
+}
+```
+
 
 
 真泛型：泛型无论在源码、编译后还是运行期都是真实存在，例如List< Integer >和List< String >就是两个不同的类型，它们在系统运行期生成，有自己的虚方法表和类型数据，这种实现称为**类型膨胀**，基于这种方法实现的泛型称为**真实泛型**。C#中的泛型就是真实泛型。
@@ -174,6 +203,8 @@ public interface Function<T, R> {
 ###### 通配符使用场景
 
 <font color='red'>Producer Extends, Consumer Super</font>
+
+PECS
 
 即，生产者使用 extends，消费者使用super
 
@@ -266,9 +297,59 @@ public static void animalDeal(Animal animal) {
 
 
 
-泛型与Json结合
+###### TypeReference 
 
-TypeReference 嵌套泛型
+泛型与Json结合使用，TypeReference 类型引导
+
+```java
+package com.yiwyn;
+
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.TypeReference;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class Main {
+    public static void main(String[] args) {
+
+        // 这里List中指定泛型 Person
+        List<Person> persons = new ArrayList<>();
+        persons.add(new Person("Yiwyn", 18));
+
+        String listJson = JSON.toJSONString(persons);
+
+        /* 这里listJson => [{"age":18,"name":"Yiwyn"}]
+        我们如何把listJson字符串优雅的转换呢？
+        这个问题引申出json与泛型之间的抓换处理
+         */
+        // 方案1 无形之间把泛型抹去了
+        List list = JSON.parseObject(listJson, List.class);
+        for (Object o : list) {
+            Integer age = ((Person) o).getAge();
+            System.out.println(age);
+        }
+
+        // 方案2 针对泛型的处理方案 TypeReference
+        List<Person> peoples = JSON.parseObject(listJson, new TypeReference<List<Person>>() {
+        });
+        for (Person people : peoples) {
+            Integer age = people.getAge();
+            System.out.println(age);
+        }
+    }
+
+    @Data
+    @AllArgsConstructor
+    public static class Person {
+        private String name;
+        private Integer age;
+    }
+
+}
+```
 
 
 
