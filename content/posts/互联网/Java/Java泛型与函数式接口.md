@@ -309,36 +309,41 @@ import com.alibaba.fastjson.TypeReference;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 
-import java.util.ArrayList;
-import java.util.List;
-
 public class Main {
     public static void main(String[] args) {
 
-        // 这里List中指定泛型 Person
-        List<Person> persons = new ArrayList<>();
-        persons.add(new Person("Yiwyn", 18));
+        ApiResponse<Person> apiResponse = new ApiResponse<>();
+        apiResponse.setCode(0);
+        apiResponse.setMsg("success");
+        apiResponse.setData(new Person("Yiwyn", 18));
 
-        String listJson = JSON.toJSONString(persons);
+        String responseJson = JSON.toJSONString(apiResponse);
+        // {"code":0,"data":{"age":18,"name":"Yiwyn"},"msg":"success"}
 
-        /* 这里listJson => [{"age":18,"name":"Yiwyn"}]
-        我们如何把listJson字符串优雅的转换呢？
-        这个问题引申出json与泛型之间的转换处理
+        // 方案1（错误方案） 谈笑风生间把嵌套的泛型抹去了 ApiResponse<Person> => ApiResponse
+        ApiResponse apiResponse1 = JSON.parseObject(responseJson, ApiResponse.class);
+        Object data = apiResponse1.getData();
+        Person p = (Person) data;
+        /*
+           这里直接转会报错 原因如下
+            data 字段的类型信息丢失了。
+            这是因为 Java 的泛型在运行时会被擦除（Type Erasure），
+            导致 ApiResponse 中的 T 类型信息在运行时无法被保留。
          */
-        // 方案1 无形之间把泛型抹去了(这段代码实际会报错，正常应该使用Json.parseArray())
-        List list = JSON.parseObject(listJson, List.class);
-        for (Object o : list) {
-            Integer age = ((Person) o).getAge();
-            System.out.println(age);
-        }
+        System.out.println(p);
 
-        // 方案2 针对泛型的处理方案 TypeReference
-        List<Person> peoples = JSON.parseObject(listJson, new TypeReference<List<Person>>() {
+        // 方案2 使用 TypeReference
+        ApiResponse<Person> personApiResponse = JSON.parseObject(responseJson, new TypeReference<ApiResponse<Person>>() {
         });
-        for (Person people : peoples) {
-            Integer age = people.getAge();
-            System.out.println(age);
-        }
+        Person data1 = personApiResponse.getData();
+        System.out.println(data1);
+    }
+
+    @Data
+    public static class ApiResponse<T> {
+        private Integer code;
+        private String msg;
+        private T data;
     }
 
     @Data
@@ -347,7 +352,7 @@ public class Main {
         private String name;
         private Integer age;
     }
-
+    
 }
 ```
 
