@@ -1,11 +1,11 @@
 +++
-title = '【更新中】Java泛型与函数式接口'
+title = 'Java泛型实战'
 
 date = 2024-12-23T13:27:48+08:00
 
 categories = ["Java"]
 
-tags = ["泛型","函数式接口","Lambda"]
+tags = ["泛型"]
 
 +++
 
@@ -167,7 +167,7 @@ public class Box {
 
 ----------
 
-e.g. 摘自 **Function** 函数式接口，可以从注释中观察到，<T>定义方法的输入类型;<R>定义方法的返回类型，读者可自行查看其它接口注释，本文不再赘述。
+e.g. 摘自 **Function** 函数式接口，可以从注释中观察到，`<T>`定义方法的输入类型;<R>定义方法的返回类型，读者可自行查看其它接口注释，本文不再赘述。
 ````java 
 /**
  * @param <T> the type of the input to the function
