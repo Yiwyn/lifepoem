@@ -15,6 +15,42 @@ draft = true
 
 ##### 基本架构
 
+##### 核心实战
+
+###### Namespace
+
+命名空间用来隔离资源
+
+Shell
+
+```shell
+kubectl create ns [namespace name]
+kubectl delete ns [namespace name]
+```
+
+Yaml
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: [namespace name]
+```
+
+
+
+###### Pod
+
+运行一组容器，Pod是k8s中应用的最小单位
+
+###### Deployment
+
+###### Service
+
+
+
+
+
 ##### 工作负载
 
 ##### 网络服务
