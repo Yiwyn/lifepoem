@@ -36,6 +36,10 @@ Spring项目在使用Drools规则引擎做规则校验时出现并发问题，�
 
 在问题分析前对Drools相关模块进行简单描述，以便下文对源码相关部分进行解读
 
+![image-20250309194306655](https://filestore.lifepoem.fun/know/202503091943747.png)
+
+
+
 | 模块名称          | 作用描述                                                    | 关键功能/特性                                                |
 | ----------------- | ----------------------------------------------------------- | ------------------------------------------------------------ |
 | **Kie API**       | 提供规则引擎的核心编程接口。                                | - `KieServices`：入口点，获取其他 Kie 组件。<br>- `KieContainer`：管理规则和资源。<br>- `KieSession`：规则执行的会话环境。<br>- `KieBase`：存储编译后的规则。 |
@@ -71,7 +75,7 @@ public void droolsLifeCycle() {
     File file = fpath.toFile();
     kieFileSystem.write(ResourceFactory.newFileResource(file));
 
-    // 2. 加载drl规则文件
+    // 2. 加载drl规则文件到内存
     KieBuilder kieBuilder = kieServices.newKieBuilder(kieFileSystem).buildAll();
     Results results = kieBuilder.getResults();
     if (results.hasMessages(Message.Level.ERROR)) {
