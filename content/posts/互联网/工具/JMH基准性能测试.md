@@ -149,7 +149,7 @@ public class StringTest {
 
 output
 
-```tex
+```apl
 # JMH version: 1.37
 # VM version: JDK 17.0.15, OpenJDK 64-Bit Server VM, 17.0.15+6
 # VM invoker: D:\Program Files\Java\dragonwell-17.0.15.0.16+6-GA\bin\java.exe
@@ -341,3 +341,20 @@ MyBenchmark.test  ss    10   45.213 ± 2.341  ms/op
 高并发任务优先看吞吐量；
 低延迟要求（如接口响应）优先看平均时间或采样时间的分位数；
 初始化操作看单次执行时间。
+
+
+
+---
+
+
+
+##### WarmUp
+
+Warmup 是指在实际进行 Benchmark 前先进行预热的行为。
+
+因为 JVM 的 JIT（Java Intime Compiler，即时编译） 机制的存在，如果某个函数被调用多次之后，JVM 会尝试将其编译成为机器码从而提高执行速度。为了让 Benchmark 的结果更加接近真实情况就需要进行预热。
+
+
+
+* [基本功 | Java即时编译器原理解析及实践 - 美团技术团队](https://tech.meituan.com/2020/10/22/java-jit-practice-in-meituan.html)
+
