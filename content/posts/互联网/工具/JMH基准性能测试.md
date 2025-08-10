@@ -18,6 +18,8 @@ tags = ["JMH","基准测试"]
 > 背景：
 >
 > 在庞大的系统中进行开发，为了保证系统性能，我们通常会针对不同的维度进行性能测试，常见的测试方式如压测等，由于系统逐渐庞大，我们的测试粒度会响应的变小（从上到下进行测试成本较高，更多的时候我们需要针对下层的方法进行测试）。本次的主题将展开面向方法层级的性能测试，以保证可以从下而上的不断进行性能优化。
+>
+> 由于篇幅有限，本文只做大概索引，更多内容感兴趣的朋友可自行查阅。
 
 
 
@@ -149,7 +151,7 @@ public class StringTest {
 
 output
 
-```apl
+```shell
 # JMH version: 1.37
 # VM version: JDK 17.0.15, OpenJDK 64-Bit Server VM, 17.0.15+6
 # VM invoker: D:\Program Files\Java\dragonwell-17.0.15.0.16+6-GA\bin\java.exe
@@ -233,7 +235,7 @@ StringTest.stringTest       thrpt    5    7064.599 ±  782.054  ops/s
 
 测试输出中，我们可以得到一些关键信息如 JVM信息、JMH配置信息、被测代码执行信息等。我们先关注最后的汇总数据
 
-```tex
+```shell
 Benchmark(方法名)           Mode(模式)  Cnt(执行次数)    Score(分数)  Error(误差)  	Units(单位)
 StringTest.stringBuildTest  thrpt    	5  			178681.122 ± 8675.361  		ops/s
 StringTest.stringTest       thrpt    	5   		  7064.599 ±  782.054  		ops/s
@@ -269,7 +271,7 @@ StringTest.stringTest       thrpt    	5   		  7064.599 ±  782.054  		ops/s
 含义：单位时间内完成的操作次数（如次 / 秒），衡量代码的处理效率。
 数据示例：
 
-```plaintext
+```shell
 Benchmark         Mode  Cnt    Score   Error  Units
 MyBenchmark.test  thrpt   20  567.324 ± 8.123  ops/s
 ```
@@ -285,7 +287,7 @@ MyBenchmark.test  thrpt   20  567.324 ± 8.123  ops/s
 含义：每次操作的平均耗时，衡量单次操作的平均效率。
 数据示例：
 
-```plaintext
+```shell
 Benchmark         Mode  Cnt    Score   Error  Units
 MyBenchmark.test   avgt   20   1.762 ± 0.032  ms/op
 ```
@@ -301,7 +303,7 @@ MyBenchmark.test   avgt   20   1.762 ± 0.032  ms/op
 含义：随机采样部分操作的耗时，统计分布情况（如分位数），适合分析长尾延迟。
 数据示例：
 
-```plaintext
+```shell
 Benchmark         Mode  Cnt    Score   Error  Units
 MyBenchmark.test  sample  100  95th=2.134  ms/op
 MyBenchmark.test  sample  100  99th=3.567  ms/op
@@ -318,7 +320,7 @@ MyBenchmark.test  sample  100  99th=3.567  ms/op
 含义：测量单次操作的耗时（不重复执行），适合冷启动场景（如初始化操作）。
 数据示例：
 
-```plaintext
+```shell
 Benchmark         Mode  Cnt    Score   Error  Units
 MyBenchmark.test  ss    10   45.213 ± 2.341  ms/op
 ```
@@ -350,11 +352,119 @@ MyBenchmark.test  ss    10   45.213 ± 2.341  ms/op
 
 ##### WarmUp
 
-Warmup 是指在实际进行 Benchmark 前先进行预热的行为。
+Warmup 是指在实际进行 Benchmark 前先进行预热的行为，所有的预热数据不会被纳入统计中。
+
+###### 触发 JIT 编译
 
 因为 JVM 的 JIT（Java Intime Compiler，即时编译） 机制的存在，如果某个函数被调用多次之后，JVM 会尝试将其编译成为机器码从而提高执行速度。为了让 Benchmark 的结果更加接近真实情况就需要进行预热。
+
+###### 稳定内存布局
+
+首次执行代码时，JVM 会进行类加载、对象初始化、内存分配等操作，这些操作会导致内存布局（如对象地址、缓存分布）不稳定。预热能让内存状态达到稳定（如对象进入老年代、缓存命中率趋于稳定），避免这些一次性开销影响测量结果。
+
+###### 消除系统波动
+
+程序启动初期，系统资源（CPU、内存）可能被其他进程或 JVM 自身的初始化任务占用，预热过程可以 “平滑” 这些波动，让测量阶段的系统状态更稳定。
 
 
 
 * [基本功 | Java即时编译器原理解析及实践 - 美团技术团队](https://tech.meituan.com/2020/10/22/java-jit-practice-in-meituan.html)
 
+
+
+---
+
+
+
+##### Measurement
+
+度量，参数和WarmUp相同，所有的度量数据会被纳入到统计中。
+
+
+
+---
+
+
+
+##### Fork
+
+在 JMH 中，`@Fork`注解用于控制基准测试的**进程隔离**行为，它决定了 JMH 会启动多少个独立的 JVM 进程来执行测试，以及每个进程的 JVM 参数配置。其核心作用是消除不同测试之间的干扰，确保结果的独立性和可靠性。
+
+###### 实战建议
+
+1. **默认推荐`@Fork(1)`**：大多数场景下，1 个独立进程足以避免状态污染，且测试效率较高。
+2. **关键测试建议`@Fork(2)`或更高**：对于核心性能指标（如线上接口响应时间），多进程测试可以减少单次进程的偶然波动（如系统资源临时占用），让结果更可靠。
+3. **测试 JVM 参数时必须用`@Fork`**：不同 JVM 参数（如 GC 类型、堆大小）需要在独立进程中生效，否则参数冲突会导致测试无效。
+4. **避免过度 fork**：`value`值过大（如 > 5）会显著增加测试总耗时（每个进程都需重复预热和测量），需在可靠性和效率之间平衡。
+
+###### 总结
+
+`@Fork`是 JMH 保障测试独立性的核心机制，通过进程隔离消除 JVM 状态污染，同时支持定制 JVM 参数以测试不同配置的性能。合理使用`@Fork`能大幅提升基准测试结果的可信度，尤其是在对比不同代码实现或 JVM 配置时。
+
+
+
+---
+
+
+
+##### State
+
+在基准测试中，我们经常需要在测试方法之间共享数据（如输入参数、缓存对象等）。
+
+###### `@State`的主要作用
+
+1. **定义数据的生命周期范围**：指定共享数据在 “线程内”“跨线程” 还是 “跨测试组” 中有效。
+2. **自动管理状态初始化**：JMH 会在测试开始前自动初始化带`@State`注解的类，并在测试结束后自动清理。
+3. **支持多线程安全共享**：通过不同的范围配置，确保多线程测试时数据访问的安全性（或故意引入竞争条件以测试并发性能）。
+
+主要参数源代码：
+
+```java
+public enum Scope {
+    Benchmark, // 本次基准测试全局共享
+    Group, // 组内数据共享 方法搭配@Group注解
+    Thread; // 线程私有
+}
+```
+
+###### 总结
+
+`@State`注解通过定义数据共享范围，解决 JMH 基准测试中的状态管理问题。
+
+- `Scope.Thread`：线程私有，无竞争，适合无状态测试。
+- `Scope.Benchmark`：全局共享，有竞争，适合测试并发安全性和性能。
+- `Scope.Group`：组内共享，用于关联操作的协同测试。
+
+
+
+---
+
+
+
+##### 生态
+
+###### 数据报表
+
+使用 resultFormat(ResultFormatType.JSON)  api可输出统计文件
+
+```java
+/**
+	@see  org.openjdk.jmh.runner.options.ChainedOptionsBuilder#resultFormat
+**/
+public static void main(String[] args) throws RunnerException {
+        Options opt = new OptionsBuilder()
+                .include(Main.class.getSimpleName())
+                .resultFormat(ResultFormatType.JSON)
+                .addProfiler(GCProfiler.class)
+                .build();
+        new Runner(opt).run();
+    }
+```
+
+在得到统计文件后，可使用开源工具对文件进行可视化展示
+
+[JMH Visualizer](https://jmh.morethan.io/)
+
+[JMH Visual Chart](https://deepoove.com/jmh-visual-chart/)
+
+<img src="https://filestore.lifepoem.fun/know/20250811000829819.png" alt="image-20250811000823432" style="zoom:67%;" />
