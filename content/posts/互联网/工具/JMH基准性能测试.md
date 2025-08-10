@@ -42,7 +42,7 @@ tags = ["JMH","基准测试"]
 JMH is a Java harness for building, running, and analysing nano/micro/milli/macro benchmarks written in Java and other languages targeting the JVM.
 JMH 是一个 Java 工具，用于构建、运行和分析用 Java 和其他针对 JVM 的语言编写的纳米/微/毫/宏基准测试。
 
-[openjdk/jmh：https://openjdk.org/projects/code-tools/jmh --- openjdk/jmh: https://openjdk.org/projects/code-tools/jmh](https://github.com/openjdk/jmh)
+[openjdk/jmh](https://github.com/openjdk/jmh)
 
 JMH由OpenJDK团队维护，官方于JDK1.9将JMH集成到了JDK中。
 
