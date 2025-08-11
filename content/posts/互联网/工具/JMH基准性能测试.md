@@ -380,6 +380,10 @@ Warmup 是指在实际进行 Benchmark 前先进行预热的行为，所有的�
 
 度量，参数和WarmUp相同，所有的度量数据会被纳入到统计中。
 
+⚠️ **这里需要注意一点，同时设置了 iterations 和 time ， JMH会按照时间执行**
+
+例如： iterations = 1  time=10 ， 被测试方法会执行10个时间单位，而不是执行一次迭代。若单位时间内执行不够iterations，很遗憾，测试依然会被直接终结。
+
 
 
 ---
@@ -455,6 +459,7 @@ public static void main(String[] args) throws RunnerException {
         Options opt = new OptionsBuilder()
                 .include(Main.class.getSimpleName())
                 .resultFormat(ResultFormatType.JSON)
+                .result("./result.json") // 输出路径，可选项目
                 .addProfiler(GCProfiler.class)
                 .build();
         new Runner(opt).run();
@@ -468,3 +473,142 @@ public static void main(String[] args) throws RunnerException {
 [JMH Visual Chart](https://deepoove.com/jmh-visual-chart/)
 
 <img src="https://filestore.lifepoem.fun/know/20250811000829819.png" alt="image-20250811000823432" style="zoom:67%;" />
+
+
+
+---
+
+
+
+##### 扩展案例
+
+###### 在SpringTest中使用JMH
+
+
+
+```java
+package com.yiwyn.jmh.service;
+
+import com.yiwyn.jmh.JmhDemoApplication;
+import org.junit.jupiter.api.Test;
+import org.openjdk.jmh.annotations.*;
+import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.RunnerException;
+import org.openjdk.jmh.runner.options.Options;
+import org.openjdk.jmh.runner.options.OptionsBuilder;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.ConfigurableApplicationContext;
+
+import java.util.concurrent.TimeUnit;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+
+@SpringBootTest
+@Fork(1)
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.NANOSECONDS)
+@State(Scope.Thread)
+@Warmup(iterations = 1, time = 1)
+@Measurement(iterations = 2, time = 1)
+public class TestServiceTest {
+
+
+    private TestService testService;
+
+    ConfigurableApplicationContext application;
+    @Setup(Level.Trial)
+    public void setup() {
+        application = SpringApplication.run(JmhDemoApplication.class);
+
+        testService = application.getBean(TestService.class);
+    }
+
+    @TearDown(Level.Trial)
+    public void tearDown() {
+        application.close();
+    }
+
+
+    @Benchmark
+    public void joinString() {
+        String s = testService.joinString(100);
+        System.out.println(s);
+    }
+
+    public static void main(String[] args) throws RunnerException {
+        Options options = new OptionsBuilder()
+                .include(TestServiceTest.class.getSimpleName())
+                .build();
+
+        new Runner(options).run();
+    }
+
+}
+```
+
+Q：为什么要这么写@Setup @TearDown
+
+A：因为测试方法joinString中调用的Bean是spring容器的，但是直接启动main方法是获取不到Spring容器的，为了获取到容器，我们使用setUp提前获取到spring容器，并且从Spring容器中获取需要使用的Bean。
+
+**`@Setup(Level.Trial)` 初始化全局资源 → 整个测试轮次使用 → `@TearDown(Level.Trial)` 释放全局资源**
+
+
+
+---
+
+
+
+##### 同一个方法多次调用对比
+
+```java
+package com.yiwyn.example;
+
+import org.openjdk.jmh.annotations.*;
+import org.openjdk.jmh.results.format.ResultFormatType;
+import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.RunnerException;
+import org.openjdk.jmh.runner.options.Options;
+import org.openjdk.jmh.runner.options.OptionsBuilder;
+
+import java.util.concurrent.TimeUnit;
+
+@BenchmarkMode(Mode.Throughput)
+@OutputTimeUnit(TimeUnit.SECONDS)
+@State(Scope.Benchmark)
+@Warmup(iterations = 1, time = 1, timeUnit = TimeUnit.SECONDS)
+@Measurement(iterations = 2, time = 1, timeUnit = TimeUnit.SECONDS)
+@Fork(1)
+public class ParamTest {
+
+
+    @Param(value = {"1", "10", "100"})
+    public Integer param;
+
+
+    @Benchmark
+    public String iterationTest() {
+
+        String a = "";
+        for (int i = 0; i < param; i++) {
+            a += i;
+        }
+        return a;
+    }
+
+
+    public static void main(String[] args) throws RunnerException {
+        Options options = new OptionsBuilder()
+                .include(ParamTest.class.getSimpleName())
+                .build();
+
+        new Runner(options).run();
+    }
+}
+
+```
+
+@Param注解 可以定义每次iteration中使用不同的参数，用来测试同一个方法在不同数量级调用的结果。
