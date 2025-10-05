@@ -63,12 +63,9 @@ tags = ["Arthas","测试","诊断","Java"]
 
    
 
-> 参考文档
+> 原理参考文档
 >
 > [Java动态追踪技术探究 - 美团技术团队](https://tech.meituan.com/2019/02/28/java-dynamic-trace.html)
-
-
-
 
 
 
