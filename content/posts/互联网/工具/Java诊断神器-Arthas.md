@@ -58,7 +58,7 @@ tags = ["Arthas","测试","诊断","Java"]
    # 根据id删除对应的retransform entry
    retransform -d 1
    # 重新retransform这个类
-   retransfrom --class xx.xxx.Test
+   retransfrom --classPattern xx.xxx.Test
    ```
 
    
@@ -66,7 +66,6 @@ tags = ["Arthas","测试","诊断","Java"]
 > 原理参考文档
 >
 > [Java动态追踪技术探究 - 美团技术团队](https://tech.meituan.com/2019/02/28/java-dynamic-trace.html)
-
 
 
 
