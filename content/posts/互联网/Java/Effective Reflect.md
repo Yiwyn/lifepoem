@@ -65,10 +65,115 @@ tags = ["反射","MethodHandle"]
 
 尽管我们都知道，反射是耗费性能的，但是还是需要分析具体慢在哪一步，从而逐步优化。
 
+
+
+###### Step 1.
+
 先写一个简单的场景，我们创建10w用户，并给10w用户通过反射将手机号附加到用户名上。
 
 ```java
-public void step1() throws NoSuchFieldException, IllegalAccessException {
+    public void step1() throws NoSuchFieldException, IllegalAccessException, NoSuchMethodException, InvocationTargetException {
+        // 用户集合
+        List<User> list = new ArrayList<>();
+
+        // 创建10w个用户，并把给手机号赋值
+        for (int i = 0; i < 100_000; i++) {
+            User us = new User();
+            us.setPhone("" + i);
+            list.add(us);
+        }
+
+        // 使用反射将手机号给用户民赋值
+        for (User user : list) {
+            Class<User> userClass = User.class;
+            Field phone = userClass.getDeclaredField("phone");
+            phone.setAccessible(true);
+            Object o = phone.get(user);
+            Field userName = userClass.getDeclaredField("userName");
+            userName.setAccessible(true);
+            userName.set(user, "用户" + o);
+        }
+
+        // 模拟反射调用登陆
+        for (User user : list) {
+            Class<User> userClass = User.class;
+            Method loginMethod = userClass.getDeclaredMethod("login", String.class);
+            loginMethod.setAccessible(true);
+            Object invoke = loginMethod.invoke(user, user.getUserName());
+            user.setLoginStatus((Boolean) invoke);
+        }
+    }
+```
+
+可以得倒火焰图如下：
+
+![PixPin_2025-12-02_22-46-58](https://filestore.lifepoem.fun/know/20251202224706284.png)
+
+我们可以看到在方法step1执行的过程中，setAccessible 和 Field.set 的占用是比较高的。整体耗时60ms，其中40ms在反射相关的操作上（这里linkToTargetMethod暂不讨论）
+
+
+
+###### Step 2.
+
+于是我们第一个优化方案将就有了， 减少上述两个方法的调用。
+
+```java
+    public void step2() throws NoSuchFieldException, IllegalAccessException, NoSuchMethodException, InvocationTargetException {
+        // 用户集合
+        List<User> list = new ArrayList<>();
+
+        // 创建10w个用户，并把给手机号赋值
+        for (int i = 0; i < 100_000; i++) {
+            User us = new User();
+            us.setPhone("" + i);
+            list.add(us);
+        }
+        // 将影响性能的调用抽出来，一次调用
+        Class<User> userClass = User.class;
+        Field phone = userClass.getDeclaredField("phone");
+        phone.setAccessible(true);
+        Field userName = userClass.getDeclaredField("userName");
+        userName.setAccessible(true);
+
+        // 使用反射将手机号给用户民赋值
+        for (User user : list) {
+            Object o = phone.get(user);
+            userName.set(user, "用户" + o);
+        }
+
+        // 将影响性能的调用抽出来，一次调用
+        Method loginMethod = userClass.getDeclaredMethod("login", String.class);
+        loginMethod.setAccessible(true);
+        // 模拟反射调用登陆
+        for (User user : list) {
+            Object invoke = loginMethod.invoke(user, user.getUserName());
+            user.setLoginStatus((Boolean) invoke);
+        }
+
+    }
+```
+
+重新执行，可以发现反射相关的性能损耗得倒有效的降低。
+
+如下图：
+
+
+
+###### Step 3.
+
+先看一段源码，这个是getDeclaredField方法的实现，我们能看发现从这个方法中获取的Field实例其实是copy出来的，也就是每次使用getDeclaredField 方法总会得到一个新的Field，尽管他们是同一个字段。
+
+![PixPin_2025-12-02_23-04-18](https://filestore.lifepoem.fun/know/20251202230435641.png)
+
+所以就有了大家经常看到的优化方案，各种视频&博客（包括我）都会教大家把Field、Method缓存起来。
+
+于是就有了
+
+```java
+private static final Map<Class<?>, Field[]> fieldCache = new ConcurrentHashMap<>();
+private static final Map<Class<?>, Method[]> methodCache = new ConcurrentHashMap<>();
+
+public void step3() throws NoSuchFieldException, IllegalAccessException, InvocationTargetException {
     // 用户集合
     List<User> list = new ArrayList<>();
 
@@ -78,23 +183,58 @@ public void step1() throws NoSuchFieldException, IllegalAccessException {
         us.setPhone("" + i);
         list.add(us);
     }
+    // 将影响性能的调用抽出来，一次调用
+
+		// 模拟使用缓存，实际使用还有偏差
+ 		Field[] fields = fieldCache.computeIfAbsent(User.class, aClass -> {
+            Field[] declaredFields = aClass.getDeclaredFields();
+            for (Field declaredField : declaredFields) {
+                declaredField.setAccessible(true);
+            }
+            return declaredFields;
+        });
+    Field phone = Arrays.stream(fields).filter(p -> p.getName().equals("phone")).findFirst().get();
+    Field userName = Arrays.stream(fields).filter(p -> p.getName().equals("userName")).findFirst().get();
+
 
     // 使用反射将手机号给用户民赋值
     for (User user : list) {
-        Class<User> userClass = User.class;
-        Field phone = userClass.getDeclaredField("phone");
-        phone.setAccessible(true);
         Object o = phone.get(user);
-        Field userName = userClass.getDeclaredField("userName");
-        userName.setAccessible(true);
         userName.set(user, "用户" + o);
     }
+		
+    // 模拟缓存
+     Method[] methods = methodCache.computeIfAbsent(User.class, aClass -> {
+            Method[] declaredMethods = aClass.getDeclaredMethods();
+            for (Method declaredMethod : declaredMethods) {
+                declaredMethod.setAccessible(true);
+            }
+            return declaredMethods;
+        });
+    Method loginMethod = Arrays.stream(methods).filter(m -> m.getName().equals("login")).findFirst().get();
+
+    // 模拟反射调用登陆
+    for (User user : list) {
+        Object invoke = loginMethod.invoke(user, user.getUserName());
+        user.setLoginStatus((Boolean) invoke);
+    }
+    
 }
 ```
 
+到了这一步，看起来好像都好起来，在将大部分反射耗时操作缓存后效果已经非常明显了。
+
+火焰图如下：
 
 
 
+
+
+但是我们可不会止步于此～
+
+###### Step 4.
+
+作为一个成熟的开发
 
 
 
