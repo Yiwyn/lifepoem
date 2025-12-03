@@ -107,9 +107,11 @@ tags = ["反射","MethodHandle"]
 
 可以得倒火焰图如下：
 
-![PixPin_2025-12-02_22-46-58](https://filestore.lifepoem.fun/know/20251202224706284.png)
+![image-20251203120506952](https://filestore.lifepoem.fun/know/202512031205027.png)
 
-我们可以看到在方法step1执行的过程中，setAccessible 和 Field.set 的占用是比较高的。整体耗时60ms，其中40ms在反射相关的操作上（这里linkToTargetMethod暂不讨论）
+![image-20251203120540391](https://filestore.lifepoem.fun/know/202512031205432.png)
+
+我们可以看到在方法step1执行的过程中，setAccessible 和 Field.set 的占用是比较高的。整体耗时占比50，其中一半的耗时在反射相关的操作上
 
 
 
@@ -157,7 +159,7 @@ tags = ["反射","MethodHandle"]
 
 如下图：
 
-
+![image-20251203121218639](https://filestore.lifepoem.fun/know/202512031212696.png)
 
 ###### Step 3.
 
