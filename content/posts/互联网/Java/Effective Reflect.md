@@ -67,7 +67,7 @@ tags = ["反射","MethodHandle"]
 
 
 
-###### Step 1.
+###### Step 1. 原始
 
 先写一个简单的场景，我们创建10w用户，并给10w用户通过反射将手机号附加到用户名上。
 
@@ -115,7 +115,7 @@ tags = ["反射","MethodHandle"]
 
 
 
-###### Step 2.
+###### Step 2.  把耗时的部分抽出来
 
 于是我们第一个优化方案将就有了， 减少上述两个方法的调用。
 
@@ -159,9 +159,9 @@ tags = ["反射","MethodHandle"]
 
 如下图：
 
-![image-20251203121218639](https://filestore.lifepoem.fun/know/202512031212696.png)
+![PixPin_2025-12-07_15-50-48](https://filestore.lifepoem.fun/know/20251207155102864.png)
 
-###### Step 3.
+###### Step 3. 缓存一下
 
 先看一段源码，这个是getDeclaredField方法的实现，我们能看发现从这个方法中获取的Field实例其实是copy出来的，也就是每次使用getDeclaredField 方法总会得到一个新的Field，尽管他们是同一个字段。
 
@@ -234,9 +234,315 @@ public void step3() throws NoSuchFieldException, IllegalAccessException, Invocat
 
 但是我们可不会止步于此～
 
-###### Step 4.
+###### Step 4.   不止于此
 
-作为一个成熟的开发
+作为一个成熟的开发，如何仅仅到了缓存元数据的层面，还不足以称为高效。
+
+众所周知，Java从发布起就有反射，通过反射可以在运行时做一些更加高级操作，但是执行速度慢一直以来是一个大问题。于是Java7开始提供了另一套API **MethodHandle**  
+
+本文简单看一下Methodhandle的优势（后续有机会单独分析讲解）
+
+| 特性                | 传统反射 (Method/Field)  | MethodHandle                 |
+| ------------------- | ------------------------ | ---------------------------- |
+| 性能                | 低（JIT 难以优化）       | 高（接近原生调用，JIT 友好） |
+| 类型安全            | 调用时校验（运行时错误） | 初始化时校验（提前暴露问题） |
+| 访问控制            | 粗暴（setAccessible）    | 精细（基于 Lookup 上下文）   |
+| 方法适配            | 无（需手动转换）         | 丰富（绑定、转换、组合）     |
+| 模块化适配（JDK9+） | 需额外配置 opens         | 天然适配                     |
+| 动态语言支持        | 差                       | 优（基于 invokedynamic）     |
+
+
+
+于是我们重新将step2的代码优化了一下
+
+```java
+public void step00() throws Throwable {
+        // 用户集合
+        List<User> list = new ArrayList<>();
+
+        // 创建10w个用户，并把给手机号赋值
+        for (int i = 0; i < loopSize; i++) {
+            User us = new User();
+            us.setPhone("" + i);
+            list.add(us);
+        }
+        MethodHandles.Lookup lookup = MethodHandles.lookup();
+        // 将影响性能的调用抽出来，一次调用
+        Class<User> userClass = User.class;
+        Field phone = userClass.getDeclaredField("phone");
+        phone.setAccessible(true);
+        MethodHandle phoneMethodHandle = lookup.unreflectGetter(phone);
+        Field userName = userClass.getDeclaredField("userName");
+        userName.setAccessible(true);
+        MethodHandle usernameMethodHandle = lookup.unreflectSetter(userName);
+
+        // 使用反射将手机号给用户民赋值
+        for (User user : list) {
+            Object o = phoneMethodHandle.invoke(user).toString();
+            usernameMethodHandle.invoke(user, "用户" + o);
+        }
+
+        Method loginMethod = userClass.getDeclaredMethod("login", String.class);
+        MethodHandle loginMethodHandle = lookup.unreflect(loginMethod);
+
+        loginMethod.setAccessible(true);
+        // 模拟反射调用登陆
+        for (User user : list) {
+            Object invoke = loginMethodHandle.invoke(user, user.getUserName());
+            user.setLoginStatus((Boolean) invoke);
+        }
+
+    }
+```
+
+优化后，我们来看一下火焰图
+
+![PixPin_2025-12-07_15-52-54](https://filestore.lifepoem.fun/know/20251207155306918.png)
+
+可以看到，多了linkToTargetMehtod的消耗，这个就是使用了MethodHandle的消耗，同时我们发现，step2中也有这个方法消耗，其实Java8中部分场景下反射也会被动的被优化MethodHandle相关。
+
+到了这一步，我们继续使用火焰图来看的性能已经不是非常方便了（可能会因为误差导致误判断，实际上上面的几个step也有可能被其他因素影响），于是我们使用另外的工具进行性能评测。
+
+
+
+JMH，我们使用JAVA官方提供的基准性能测试工具来进行接下来的性能比较。如果不了解JMH的读者，可以翻一下以往的文章，或者直接百度 Java JMH
+
+[JMH基准性能测试 | Yiwyn's ~ShenZhi Blog](https://blog.lifepoem.fun/posts/互联网/工具/jmh基准性能测试/)
+
+
+
+###### Step 5. 还是不太够
+
+我们已经使用了MethodHandle，这么样才能更快呢，我们发现MethodHandle中还有出了invoke()外还有一个API， invokeExact()，更加精准的调用，我们来看一下两种调用方法的差距
+
+| 特性       | invokeExact                                                  | invoke                                                      |
+| ---------- | ------------------------------------------------------------ | ----------------------------------------------------------- |
+| 类型匹配   | 严格匹配 `MethodType`（精确到类型、数量、顺序，包括基本类型 / 包装类） | 宽松匹配，自动做类型适配（拆箱 / 装箱、宽化转换、参数重排） |
+| 运行时开销 | 无额外适配开销，直接执行目标方法                             | 需动态校验 + 转换类型，有适配开销                           |
+| 性能       | 接近原生方法调用（JIT 优化友好）                             | 略低（适配逻辑消耗 CPU）                                    |
+| 异常       | 类型不匹配抛 `WrongMethodTypeException`                      | 适配失败才抛异常（如无法转换类型）                          |
+
+于是我们有了接下来一段代码
+
+
+
+```java
+    
+    @Benchmark
+    public void step0() {
+        // 用户集合
+        List<User> list = new ArrayList<>();
+
+        // 创建10w个用户，并把给手机号赋值
+        for (int i = 0; i < loopSize; i++) {
+            User us = new User();
+            us.setPhone("" + i);
+            list.add(us);
+        }
+
+        // 使用反射将手机号给用户民赋值
+        for (User user : list) {
+            user.setUserName("用户" + user.getPhone());
+        }
+
+        // 模拟反射调用登陆
+        for (User user : list) {
+            user.login(user.getUserName());
+        }
+    }
+    
+    @Benchmark
+    public void step00() throws Throwable {
+        // 用户集合
+        List<User> list = new ArrayList<>();
+
+        // 创建10w个用户，并把给手机号赋值
+        for (int i = 0; i < loopSize; i++) {
+            User us = new User();
+            us.setPhone("" + i);
+            list.add(us);
+        }
+        MethodHandles.Lookup lookup = MethodHandles.lookup();
+        // 将影响性能的调用抽出来，一次调用
+        Class<User> userClass = User.class;
+        Field phone = userClass.getDeclaredField("phone");
+        phone.setAccessible(true);
+        MethodHandle phoneMethodHandle = lookup.unreflectGetter(phone);
+        Field userName = userClass.getDeclaredField("userName");
+        userName.setAccessible(true);
+        MethodHandle usernameMethodHandle = lookup.unreflectSetter(userName);
+
+        // 使用反射将手机号给用户民赋值
+        for (User user : list) {
+            Object o = phoneMethodHandle.invoke(user));
+            usernameMethodHandle.invoke(user, "用户" + o);
+        }
+
+        Method loginMethod = userClass.getDeclaredMethod("login", String.class);
+        MethodHandle loginMethodHandle = lookup.unreflect(loginMethod);
+
+        loginMethod.setAccessible(true);
+        // 模拟反射调用登陆
+        for (User user : list) {
+            Object invoke = loginMethodHandle.invoke(user, user.getUserName());
+            user.setLoginStatus((Boolean) invoke);
+        }
+
+    }
+
+    @Benchmark
+    public void step01() throws Throwable {
+        // 用户集合
+        List<User> list = new ArrayList<>();
+
+        // 创建10w个用户，并把给手机号赋值
+        for (int i = 0; i < loopSize; i++) {
+            User us = new User();
+            us.setPhone("" + i);
+            list.add(us);
+        }
+        MethodHandles.Lookup lookup = MethodHandles.lookup();
+        // 将影响性能的调用抽出来，一次调用
+        Class<User> userClass = User.class;
+        Field phone = userClass.getDeclaredField("phone");
+        phone.setAccessible(true);
+        MethodHandle phoneMethodHandle = lookup.unreflectGetter(phone);
+        Field userName = userClass.getDeclaredField("userName");
+        userName.setAccessible(true);
+        MethodHandle usernameMethodHandle = lookup.unreflectSetter(userName);
+
+        // 使用反射将手机号给用户民赋值
+        for (User user : list) {
+            String o = (String) phoneMethodHandle.invokeExact(user);
+            usernameMethodHandle.invokeExact(user, "用户" + o);
+        }
+
+        Method loginMethod = userClass.getDeclaredMethod("login", String.class);
+        MethodHandle loginMethodHandle = lookup.unreflect(loginMethod);
+
+        loginMethod.setAccessible(true);
+        // 模拟反射调用登陆
+        for (User user : list) {
+            boolean invoke = (boolean) loginMethodHandle.invokeExact(user, user.getUserName());
+            user.setLoginStatus(invoke);
+        }
+
+    }
+```
+
+
+
+跑过JMH后我们得到一下结果
+
+```shell
+Benchmark           Mode  Cnt     Score     Error  Units
+ReflectDemo.step0   avgt    5  3196.522 ±  54.193  us/op
+ReflectDemo.step00  avgt    5  6626.213 ± 236.807  us/op
+ReflectDemo.step01  avgt    5  5996.222 ± 169.852  us/op
+```
+
+可以发现，性能提升了大约10%。但是这个远远不及预期。还是需要继续优化（可能大家关注的是百分比，其实还需要关注时间单位us，其实现在已经比较极限了）
+
+
+
+Step 6. 最终方案
+
+在上面的案例中，Methodhandle创建是有消耗的，反射也是有消耗的，生成环境不会像测试环境这样每次单独调用，所以我们还是需要使用缓存的形式进行优化
+
+```java
+    @Setup
+    public void setup00() throws IllegalAccessException, NoSuchMethodException {
+        fieldCache.computeIfAbsent(User.class, aClass -> {
+            Field[] declaredFields = aClass.getDeclaredFields();
+            for (Field declaredField : declaredFields) {
+                declaredField.setAccessible(true);
+            }
+            return declaredFields;
+        });
+
+        methodCache.computeIfAbsent(User.class, aClass -> {
+            Method[] declaredMethods = aClass.getDeclaredMethods();
+            for (Method declaredMethod : declaredMethods) {
+                declaredMethod.setAccessible(true);
+            }
+            return declaredMethods;
+        });
+
+        Field[] fields = fieldCache.computeIfAbsent(User.class, aClass -> {
+            Field[] declaredFields = aClass.getDeclaredFields();
+            for (Field declaredField : declaredFields) {
+                declaredField.setAccessible(true);
+            }
+            return declaredFields;
+        });
+        Field phone = Arrays.stream(fields).filter(p -> p.getName().equals("phone")).findFirst().get();
+        Field userName = Arrays.stream(fields).filter(p -> p.getName().equals("userName")).findFirst().get();
+
+
+        MethodHandle phoneMethodHandle = lookup.unreflectGetter(phone);
+
+        MethodHandle usernameMethodHandle = lookup.unreflectSetter(userName);
+
+        getterHandleCache.put("phone", phoneMethodHandle);
+        setterHandleCache.put("userName", usernameMethodHandle);
+
+
+        Method loginMethod = User.class.getDeclaredMethod("login", String.class);
+        MethodHandle loginMethodHandle = lookup.unreflect(loginMethod);
+        getterHandleCache.put("login", loginMethodHandle);
+
+    }
+
+
+    @Benchmark
+    public void step03() throws Throwable {
+        // 用户集合
+        List<User> list = new ArrayList<>();
+
+        // 创建10w个用户，并把给手机号赋值
+        for (int i = 0; i < loopSize; i++) {
+            User us = new User();
+            us.setPhone("" + i);
+            list.add(us);
+        }
+
+
+        MethodHandle phoneMethodHandle = getterHandleCache.get("phone");
+        MethodHandle usernameMethodHandle = setterHandleCache.get("userName");
+        MethodHandle loginMethodHandle = getterHandleCache.get("login");
+
+        // 使用反射将手机号给用户民赋值
+        for (User user : list) {
+            String o = (String) phoneMethodHandle.invokeExact(user);
+            usernameMethodHandle.invokeExact(user, "用户" + o);
+        }
+
+        // 模拟反射调用登陆
+        for (User user : list) {
+            boolean invoke = (boolean) loginMethodHandle.invokeExact(user, user.getUserName());
+            user.setLoginStatus(invoke);
+        }
+
+    }
+```
+
+在上面的代码中，我将负责的反射，获取MethodHandle等行为都统一放到了setUp中，避免了初始化这些重对象对来的影响。
+
+再来一次JMH！
+
+```shell
+Benchmark           Mode  Cnt     Score     Error  Units
+ReflectDemo.step0   avgt    5  3343.447 ±  42.489  us/op
+ReflectDemo.step00  avgt    5  6415.128 ± 131.741  us/op
+ReflectDemo.step01  avgt    5  5868.078 ±  89.074  us/op
+ReflectDemo.step03  avgt    5  3903.561 ±  67.826  us/op
+```
+
+
+
+大获全胜，从上面的代码中，我们知道setp0就是没有反射的写法，换言之就是理想情况下最快的代码，而我们的终版代码，仅仅差距16%。
+
+
 
 
 
@@ -249,3 +555,7 @@ public void step3() throws NoSuchFieldException, IllegalAccessException, Invocat
 [1] [程序员精进之路：性能调优利器--火焰图 - 知乎](https://zhuanlan.zhihu.com/p/147875569)
 
 [2] [如何读懂火焰图？ - 阮一峰的网络日志](https://www.ruanyifeng.com/blog/2017/09/flame-graph.html)
+
+[3] [秒懂Java之方法句柄(MethodHandle)_java methodhandles-CSDN博客](https://blog.csdn.net/ShuSheng0007/article/details/107066856)
+
+[4] [用上了MethodHandle，妈妈再也不用担心我的反射性能不高了！ - 知乎](https://zhuanlan.zhihu.com/p/23637137020)
