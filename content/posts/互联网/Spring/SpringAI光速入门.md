@@ -43,9 +43,13 @@ draft = true
 
 - ###### Prompt（提示词）
 
-  发送给模型的”指令“，引导AI生成内容的信息，是生成逾期内容的主要手段。
+  发送给模型的”指令“，引导AI生成内容的信息，是生成预期内容的主要手段。
 
   一般包含定义模型的角色、任务、格式
+
+- ###### Advisors（顾问/指导）
+
+  Spring AI Advisors API 提供了灵活而强大的方式来拦截、修改和增强与AI模型的交互的，类似Web中的Filter。
 
 - ###### Embedding Model（嵌入模型）
 
@@ -107,7 +111,7 @@ Spring AI supports Spring Boot 3.4.x and 3.5.x.
 
 
 
-###### 三、我们选择已OpenAI的形式对接豆包的模型
+###### 三、我们选择已OpenAI的形式对接「豆包」的模型
 
 PS：豆包的模型对应的AK信息如何获取此处不做演示
 
@@ -282,6 +286,12 @@ public class ChatConfig {
     }
 }
 ```
+
+
+
+
+
+
 
 
 
