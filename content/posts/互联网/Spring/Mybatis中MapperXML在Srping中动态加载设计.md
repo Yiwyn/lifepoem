@@ -1,5 +1,5 @@
 +++
-title = 'Mybatis中MapperXML在Srping中动态加载设计'
+title = 'Mybatis中MapperXML在Spring中动态加载设计'
 
 date = 2026-01-18T04:13:32+08:00
 
@@ -13,7 +13,7 @@ tags = ["Mybatis","Spring"]
 
 
 
-### Mybatis中MapperXML在Srping中动态加载设计
+### Mybatis中MapperXML在Spring中动态加载设计
 
 
 
