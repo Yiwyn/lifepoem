@@ -152,6 +152,8 @@ public void refreshExternalMapperByMyBatisNative(String mapperPath) throws Neste
 
 所以我们添加清理重复MapperConfig的操作，代码如下，以下为完整代码。
 
+（同样可以选择使用反射获取对应的Map进行操作，这里不做展示）
+
 ```java
 package com.yiwyn.hotxml.boot.utils;
 
