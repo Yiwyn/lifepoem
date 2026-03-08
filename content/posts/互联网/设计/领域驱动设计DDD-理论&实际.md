@@ -183,6 +183,49 @@ public class Contract implements AggregateRoot {
 }
 ```
 
+聚合中的实体一般都是充血模型（下文有充血模型的简单说明），聚合中会对外开放领域的行为。
+
+聚合通常会作为领域服务中的最小单位，这也就意味着，我们的代码，在领域设计中，在涉及到领域服务中，要尽可能的将业务对象转换为领域对象。
+
+于是就有了**防腐层**（ACL），防腐层会将第三方接口等信息返回的结果转成领域对象，通常可以设计为防腐层返回的信息即可领域模型。
+
+对于系统自身的数据等仍然是通过持久层（Dao、Mapper）来处理。
+
+
+
+---
+
+
+
+###### 充血&贫血
+
+
+
+充血模型是DDD设计中非常核心的一个概念，重新模型不仅有数据还有业务规则和行为。
+
+贫血模型比较简单，正常MVC开发中的大部分实体类都是贫血模型，几乎是只有属性。
+
+充血模型 🌰：
+
+```java
+public class Contract {
+
+    private Long id;
+    private ContractStatus status;
+
+    public void startSigning() {
+
+        if (status != ContractStatus.DRAFT) {
+            throw new DomainException("状态错误");
+        }
+
+        status = ContractStatus.SIGNING;
+    }
+}
+```
+
+充血模型本身是有行为的，其行为通常会对内部的属性进行更新。这个特性是DDD的核心（网络上部分博主会把这一点省略掉，不理解）
+
 
 
 ---
@@ -210,25 +253,45 @@ public class Contract implements AggregateRoot {
 
 ##### 对比MVC
 
-既然谈到了后端，同样是分层架构，这就不得不提到MVC架构。
+既然提到了DDD，就不得不提MVC架构，以往的资料中对于DDD和MVC都是单选题，不过在我看来，作为一个成熟的开发，我全都要。
 
+不过为了理解，还是简单对比一下。
 
+MVC 架构
 
+```tex
+Controller
+   ↓
+Service
+   ↓
+Repository
+```
 
-
-
-
-##### 经典结构
+DDD架构
 
 ```tex
 Controller
    ↓
 ApplicationService
    ↓
+DomainService
+   ↓
 Aggregate
    ↓
 Repository
 ```
+
+
+
+我们可以看到在DDD架构中，代码的分层添加ApplicationService、DomainService和Aggregate。
+
+从层级职责来看：
+
+ApplicationService层负责的内容是领域服务的调用、编排，是对领域之间的解耦
+
+DomainService层负责的内容是对聚合的调用、编排，是对聚合之间的解耦，而聚合又是领域驱动中对外部开放的可操作最小单位
+
+Aggregate层负责了领域实体的处理，
 
 
 
