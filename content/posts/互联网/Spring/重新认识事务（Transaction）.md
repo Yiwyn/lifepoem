@@ -96,7 +96,96 @@ draft = true
 
 ##### @Transactional原理
 
+了解的事务的基本概念后，我们通过Spring源码，来看下事务的一些细节。
 
+首先通过`@EnableTransactionManagement`进入`TransactionManagementConfigurationSelector` 类，这个类中包含了事务的全部内容。
+
+![image-20260323113748873](https://filestore.lifepoem.fun/know/202603231137926.png)
+
+```java
+	/**
+	 * Returns {@link ProxyTransactionManagementConfiguration} or
+	 * {@code AspectJ(Jta)TransactionManagementConfiguration} for {@code PROXY}
+	 * and {@code ASPECTJ} values of {@link EnableTransactionManagement#mode()},
+	 * respectively.
+	 */
+	@Override
+	protected String[] selectImports(AdviceMode adviceMode) {
+		switch (adviceMode) {
+			case PROXY:
+				return new String[] {AutoProxyRegistrar.class.getName(),
+						ProxyTransactionManagementConfiguration.class.getName()};
+			case ASPECTJ:
+				return new String[] {determineTransactionAspectClass()};
+			default:
+				return null;
+		}
+	}
+```
+
+默认情况下`EnableTransactionManagement` 中
+
+```java
+AdviceMode mode() default AdviceMode.PROXY;
+```
+
+所以我们重点关注 `AutoProxyRegistrar` 、`ProxyTransactionManagementConfiguration` 
+
+其中 `AutoProxyRegistrar` 是自动代理机制来增强目标对象的功能，和实际事务关系不太大，我们可以先不看。
+
+我们把中心放到 `ProxyTransactionManagementConfiguration` 。
+
+这个类定义了三个Bean。这三个Bean做一件事，就是创建一个事务的advisor
+
+先看一个简单的例子，什么是Advisor：
+
+```java
+// 增强逻辑
+@Component
+public class TaskAdvice implements MethodInterceptor {
+
+    @Override
+    public Object invoke(MethodInvocation invocation) throws Throwable {
+        System.out.println("方法调用前: " + invocation.getMethod().getName());
+        Object result = invocation.proceed();
+        System.out.println("方法调用后: " + invocation.getMethod().getName());
+        return result;
+    }
+}
+
+// 配置类
+@Configuration
+public class TaskConfig {
+
+    // 创建advisor
+    @Bean
+    public DefaultPointcutAdvisor taskAdvisor(TaskAdvice taskAdvice) {
+        // 创建切点
+        AnnotationMatchingPointcut matchingPointcut = AnnotationMatchingPointcut.forMethodAnnotation(Task.class);
+        DefaultPointcutAdvisor defaultPointcutAdvisor = new DefaultPointcutAdvisor();
+        // 切面
+        defaultPointcutAdvisor.setAdvice(taskAdvice);
+        defaultPointcutAdvisor.setPointcut(matchingPointcut);
+        return defaultPointcutAdvisor;
+    }
+}
+```
+
+以上代码在服务启动的时候，会根据切点自动对符合条件得到类进行增强。
+
+
+
+再来看事务的配置类，就是做了三件事 ， 创建一个事务的增强实现，创建了一个事务属性信息（包含切点信息），再根据以上信息创建一个事务Advisor。所以我们先关注`TransactionInterceptor`
+
+![image-20260323165948395](https://filestore.lifepoem.fun/know/202603231659482.png)
+
+
+
+增强细节，如下图，图二就是我们使用了@Transactional的方法的真实执行时的代码。
+
+![image-20260323181058325](https://filestore.lifepoem.fun/know/202603231810394.png)
+
+![image-20260323181132368](https://filestore.lifepoem.fun/know/202603231811434.png)
 
 
 
@@ -108,7 +197,7 @@ draft = true
 
 
 
-##### 
+
 
 
 
@@ -135,12 +224,38 @@ draft = true
 
 扩展：几乎在所有的高可用系统中，任何的链接都应该设置超时时间，超时时间会让系统在规定时间内快速失败从而释放资源。没有超时时间/超时时间设计不合理会导致等待，若是业务简单则问题可能被掩盖，一旦并发上来，系统雪崩也会随之而来。
 
-举个🌰：
+**举个🌰：**
 
-A线程更新业务123方法执行完成后没有正常提交或者回滚（可能是更新后同步别的系统一直等待响应，或者就是逻辑漏洞），而另一个业务操作线程B也要更新这个业务123。巧了两个事务都没有设置超时，那事情就变得奇妙起来了，Spring层面会默认一直等待，
+- A线程更新业务123方法执行完成后没有正常提交或者回滚（可能是更新后同步别的系统一直等待响应，或者就是逻辑漏洞）
+
+- 另一个业务操作线程B也要更新这个业务123，这个时候因为业务123的数据被锁了，他要等A线程释放。
+
+🔥巧了两个事务都没有设置超时，那事情就变得奇妙起来了，Spring层面会默认一直等待，直到数据库层面事务超时释放。于是关于这笔业务的一切行为都停止了，全部都在等待事务释放。
+
+🔥🔥更巧的是如果线程B是一个批量更新的操作，那么批量更新的业务可能都被锁起来，这个时候就不仅仅是业务123的问题了，可能整个系统都在面临着极大的考验。
 
 
 
 ###### 事务隔离
 
+事务隔离是事务的一个特性，我们在开发复杂业务的时候，
+
+
+
 ###### 批量操作优化
+
+
+
+
+
+
+
+
+
+
+
+##### 参考文档：
+
+【1】[spring事务中的超时时间很多人都不理解_spring 事务超时-CSDN博客](https://blog.csdn.net/luoyang_java/article/details/105556722)
+
+【2】[面试官灵魂拷问：为什么 SQL 语句不要过多的 join？ - 知乎](https://www.zhihu.com/question/585496172/answer/1986368315585734057)
