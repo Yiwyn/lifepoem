@@ -7,8 +7,6 @@ categories = ["Spring","Transaction"]
 
 tags = ["事务"]
 
-draft = true
-
 +++
 
 ### 重新认识事务（Transaction）
@@ -477,7 +475,7 @@ public interface TransactionSynchronization extends Ordered, Flushable {
     }
 ```
 
-好🌰
+好🌰：
 
 ```java
     /**
@@ -496,15 +494,64 @@ public interface TransactionSynchronization extends Ordered, Flushable {
         if (!reponse.isSuccess()) {
             throw new RuntimeException();
         }
-        // 如果成功更新订单表
-        order.setBankApprovalSts("pass");
-        orderMapper.update(order);
+        transactionTemplate.execute(status -> {
+            // 如果成功更新订单表
+            order.setBankApprovalSts("pass");
+            orderMapper.update(order);
+            return null;
+        });
 
         // 发送通知
         notifyService.sendNotify(order);
+
+    }
+```
+
+更好的🌰：
+
+借用DDD的思想中的一个概念，聚合根和领域仓储，我们要做的是把需要一个事务操作的数据库操作作为一个仓储抽象，而事务的范围则是该仓储实现。
+
+这类实现会将数据库操作和其他操作进行解耦，`getBankApprovalResult`方法更多是对细分事务的编排（参考领域服务、领域应用服务）可简单参考：[领域驱动设计DDD-理论&实际（更新中） | Yiwyn's ~ShenZhi Blog](https://blog.lifepoem.fun/posts/互联网/设计/领域驱动设计ddd-理论实际/)
+
+```java
+    /**
+     * 查询银行审批状态
+     *
+     * @param bizSeq 业务号
+     */
+    public void getBankApprovalResult(String bizSeq) {
+        // 先查询到订单
+        Order order = orderMapper.queryById(bizSeq);
+
+        // 查询银行审批状态
+        BankReponse reponse = bankService.queryResult(order.getBankApplyId);
+
+        // 如果查询失败，直接抛异常
+        if (!reponse.isSuccess()) {
+            throw new RuntimeException();
+        }
+        // 调用订单服务更新订单结果
+        orderService.updResult(order);
+
+        // 发送通知
+        notifyService.sendNotify(order);
+
     }
 
 
+    /**
+     * 订单服务
+     */
+    @Service
+    public class OrderService {
+
+        @Transactional(rollbackFor = Exception.class)
+        public void updResult(Order order) {
+            // 如果成功更新订单表
+            order.setBankApprovalSts("pass");
+            orderMapper.update(order);
+        }
+    }
 ```
 
 
