@@ -187,6 +187,23 @@ public class TaskConfig {
 
 ![image-20260323181132368](https://filestore.lifepoem.fun/know/202603231811434.png)
 
+![image-20260323220703546](https://filestore.lifepoem.fun/know/20260323220712630.png)
+
+![image-20260323221243147](https://filestore.lifepoem.fun/know/20260323221243197.png)
+
+![image-20260323221316626](https://filestore.lifepoem.fun/know/20260323221316678.png)
+
+
+
+看上面的源码有什么用呢，从源码中我们能发现，原来`@Transactional`是这样运作的，我们从中可以发现几个点
+
+1. 标识了`@Transactional`的整个方法都是放到事务中进行的，事务的粒度非常大。此处在下文中重点描述
+2. 声明式事务是AOP技术，声明AdvisorBean代理使用事务的类，所以在实例内调用自己的方法不能触发事务（this.xx调用的是自身，而非增强代理对象）
+3. 开启事务时，如果不设置超时时间，则系统默认超时时间为-1，等于没有超时时间
+4. 在提交/回滚的方法中，包含`triggerBeforeCommit`等生命周期方法。下一段会重点描述。
+
+接下来，先看一下事务生命周期的相关函数，看了之后我们再对上述的几个点所引出的问题做解答。
+
 
 
 ##### 进阶知识
@@ -195,9 +212,229 @@ public class TaskConfig {
 
 
 
+> [Spring事务 | Yiwyn's ~ShenZhi Blog](https://blog.lifepoem.fun/posts/互联网/spring/spring事务/)
+>
+> 这里先引用一下自己的文章
+
+首先，我们先知道`TransactionSynchronizationManager`的作用是什么
+
+```java
+// 官方注释
+/**
+ * Central delegate that manages resources and transaction synchronizations per thread.
+ * To be used by resource management code but not by typical application code.
+ *
+ * <p>Supports one resource per key without overwriting, that is, a resource needs
+ * to be removed before a new one can be set for the same key.
+ * Supports a list of transaction synchronizations if synchronization is active.
+ *
+ * <p>Resource management code should check for thread-bound resources, e.g. JDBC
+ * Connections or Hibernate Sessions, via {@code getResource}. Such code is
+ * normally not supposed to bind resources to threads, as this is the responsibility
+ * of transaction managers. A further option is to lazily bind on first use if
+ * transaction synchronization is active, for performing transactions that span
+ * an arbitrary number of resources.
+ *
+ * <p>Transaction synchronization must be activated and deactivated by a transaction
+ * manager via {@link #initSynchronization()} and {@link #clearSynchronization()}.
+ * This is automatically supported by {@link AbstractPlatformTransactionManager},
+ * and thus by all standard Spring transaction managers, such as
+ * {@link org.springframework.transaction.jta.JtaTransactionManager} and
+ * {@link org.springframework.jdbc.datasource.DataSourceTransactionManager}.
+ *
+ * <p>Resource management code should only register synchronizations when this
+ * manager is active, which can be checked via {@link #isSynchronizationActive};
+ * it should perform immediate resource cleanup else. If transaction synchronization
+ * isn't active, there is either no current transaction, or the transaction manager
+ * doesn't support transaction synchronization.
+ *
+ * <p>Synchronization is for example used to always return the same resources
+ * within a JTA transaction, e.g. a JDBC Connection or a Hibernate Session for
+ * any given DataSource or SessionFactory, respectively.
+ *
+ * @author Juergen Hoeller
+ * @since 02.06.2003
+ * @see #isSynchronizationActive
+ * @see #registerSynchronization
+ * @see TransactionSynchronization
+ * @see AbstractPlatformTransactionManager#setTransactionSynchronization
+ * @see org.springframework.transaction.jta.JtaTransactionManager
+ * @see org.springframework.jdbc.datasource.DataSourceTransactionManager
+ * @see org.springframework.jdbc.datasource.DataSourceUtils#getConnection
+ */
+
+// 中文翻译
+/**
+* 核心委托类，负责管理每个线程的资源及事务同步。 
+* 供资源管理代码使用，而非供一般的应用程序代码使用。 
+*
+* <p>支持“一键一资源”模式，且不允许覆盖；即，若要为同一键设置新资源，必须先移除旧资源。 
+* 若事务同步处于激活状态，则支持维护一个事务同步列表。 
+*
+* <p>资源管理代码应通过 {@code getResource} 方法检查是否存在线程绑定的资源（例如 JDBC
+* 连接或 Hibernate Session）。此类代码通常不应自行将资源绑定到线程上，因为这是事务管理器的职责。 
+* 另一种可选方案是：若事务同步处于激活状态，则在首次使用时进行“延迟绑定”（lazy bind），
+* 以便执行跨越任意数量资源的事务操作。 
+*
+* <p>事务同步的激活与去激活操作必须由事务管理器通过 {@link #initSynchronization()} 和
+* {@link #clearSynchronization()} 方法来执行。这一机制已由 {@link AbstractPlatformTransactionManager}
+* 自动实现，因此所有的标准 Spring 事务管理器（例如
+* {@link org.springframework.transaction.jta.JtaTransactionManager} 和
+* {@link org.springframework.jdbc.datasource.DataSourceTransactionManager}）均支持此功能。 
+*
+* <p>资源管理代码仅应在当前管理器处于激活状态时注册同步对象（可通过 {@link #isSynchronizationActive}
+* 进行检查）；若管理器未处于激活状态，则应立即执行资源清理工作。如果事务同步未处于激活状态，
+* 则意味着当前不存在事务，或者当前的事务管理器不支持事务同步功能。 
+*
+* <p>事务同步机制的一个典型应用场景是：在 JTA 事务的整个生命周期内，确保针对给定的
+* DataSource 或 SessionFactory，始终返回同一个资源实例（例如同一个 JDBC 连接或 Hibernate Session）。 *
+* @author Juergen Hoeller
+* @since 2003年6月2日
+* @see #isSynchronizationActive
+* @see #registerSynchronization
+* @see TransactionSynchronization
+* @see AbstractPlatformTransactionManager#setTransactionSynchronization
+* @see org.springframework.transaction.jta.JtaTransactionManager
+* @see org.springframework.jdbc.datasource.DataSourceTransactionManager
+* @see org.springframework.jdbc.datasource.DataSourceUtils#getConnection
+```
+
+简单说，就两件事
+
+**存储事务上下文**：在当前线程中绑定事务相关的核心信息（比如数据库连接、事务是否激活、事务名称、隔离级别等），让同一线程内的所有操作都能获取到当前事务的上下文。
+
+**管理事务同步器**：允许注册 `TransactionSynchronization` 类型的回调对象，这些对象会在事务的关键阶段（提交前、提交后、回滚前、回滚后、事务完成）触发执行
 
 
 
+存储事务上下文我们一般不会操作，更多的是管理事务同步的使用，以下是翻译了注释的源代码
+
+```java
+/**
+ * 事务同步回调的接口。
+ * 由 AbstractPlatformTransactionManager 提供支持。
+ *
+ * <p>TransactionSynchronization 实现类可实现 Ordered 接口来影响其执行顺序。
+ * 未实现 Ordered 接口的同步器会被追加到同步链的末尾。
+ *
+ * <p>Spring 自身执行的系统级同步逻辑会使用特定的顺序值，允许对其执行顺序进行细粒度的控制（如有必要）。
+ *
+ * <p>从 5.3 版本开始，该接口实现了 {@link Ordered} 接口，以支持声明式控制同步器的执行顺序。
+ * 默认的 {@link #getOrder() 执行顺序} 为 {@link Ordered#LOWEST_PRECEDENCE}（最低优先级），
+ * 表示晚执行；若需提前执行，返回更小的数值即可。
+ *
+ * @author Juergen Hoeller
+ * @since 02.06.2003
+ * @see TransactionSynchronizationManager
+ * @see AbstractPlatformTransactionManager
+ * @see org.springframework.jdbc.datasource.DataSourceUtils#CONNECTION_SYNCHRONIZATION_ORDER
+ */
+public interface TransactionSynchronization extends Ordered, Flushable {
+
+    /** 事务正常提交时的完成状态 */
+    int STATUS_COMMITTED = 0;
+
+    /** 事务正常回滚时的完成状态 */
+    int STATUS_ROLLED_BACK = 1;
+
+    /** 因启发式混合完成或系统错误导致的完成状态 */
+    int STATUS_UNKNOWN = 2;
+
+
+    /**
+     * 返回此事务同步器的执行顺序。
+     * <p>默认值为 {@link Ordered#LOWEST_PRECEDENCE}（最低优先级）。
+     */
+    @Override
+    default int getOrder() {
+        return Ordered.LOWEST_PRECEDENCE;
+    }
+
+    /**
+     * 挂起此同步器。
+     * 若管理了相关资源，应将其从 TransactionSynchronizationManager 中解绑。
+     * @see TransactionSynchronizationManager#unbindResource
+     */
+    default void suspend() {
+    }
+
+    /**
+     * 恢复此同步器。
+     * 若管理了相关资源，应将其重新绑定到 TransactionSynchronizationManager。
+     * @see TransactionSynchronizationManager#bindResource
+     */
+    default void resume() {
+    }
+
+    /**
+     * 将底层会话刷新到数据存储（如适用）：
+     * 例如 Hibernate/JPA 会话。
+     * @see org.springframework.transaction.TransactionStatus#flush()
+     */
+    @Override
+    default void flush() {
+    }
+
+    /**
+     * 在事务提交前调用（早于 "beforeCompletion"）。
+     * 例如可将事务性的对象关系映射（O/R Mapping）会话刷新到数据库。
+     * <p>此回调<b>不代表</b>事务一定会被提交。即使调用了此方法，后续仍可能触发回滚决策。
+     * 该回调的设计目的是执行仅在提交仍有可能发生时才需要的操作，比如将 SQL 语句刷新到数据库。
+     * <p>注意：此方法抛出的异常会传播到提交调用方，并导致事务回滚。
+     * @param readOnly 事务是否被定义为只读事务
+     * @throws RuntimeException 发生错误时抛出；异常会<b>传播到调用方</b>
+     * （注意：此处不要抛出 TransactionException 子类！）
+     * @see #beforeCompletion
+     */
+    default void beforeCommit(boolean readOnly) {
+    }
+
+    /**
+     * 在事务提交/回滚前调用。
+     * 可在事务完成<b>前</b>执行资源清理操作。
+     * <p>即使 {@code beforeCommit} 抛出异常，此方法仍会在其之后被调用。
+     * 该回调允许在事务完成前（无论最终结果如何）关闭资源。
+     * @throws RuntimeException 发生错误时抛出；异常会<b>被记录但不传播</b>
+     * （注意：此处不要抛出 TransactionException 子类！）
+     * @see #beforeCommit
+     * @see #afterCompletion
+     */
+    default void beforeCompletion() {
+    }
+
+    /**
+     * 在事务提交后调用。可在主事务<b>成功</b>提交后立即执行后续操作。
+     * <p>例如可提交那些依赖主事务成功提交的后续操作，如发送确认消息或邮件。
+     * <p><b>注意：</b>此时事务已完成提交，但事务资源可能仍处于活跃且可访问状态。
+     * 因此，此阶段触发的任何数据访问代码仍会“参与”原始事务，允许执行一些清理操作（后续无提交动作），
+     * 除非显式声明需要在独立事务中运行。
+     * 因此：<b>对此处调用的任何事务性操作，使用 {@code PROPAGATION_REQUIRES_NEW} 传播属性。</b>
+     * @throws RuntimeException 发生错误时抛出；异常会<b>传播到调用方</b>
+     * （注意：此处不要抛出 TransactionException 子类！）
+     */
+    default void afterCommit() {
+    }
+
+    /**
+     * 在事务提交/回滚后调用。
+     * 可在事务完成<b>后</b>执行资源清理操作。
+     * <p><b>注意：</b>此时事务已完成提交或回滚，但事务资源可能仍处于活跃且可访问状态。
+     * 因此，此阶段触发的任何数据访问代码仍会“参与”原始事务，允许执行一些清理操作（后续无提交动作），
+     * 除非显式声明需要在独立事务中运行。
+     * 因此：<b>对此处调用的任何事务性操作，使用 {@code PROPAGATION_REQUIRES_NEW} 传播属性。</b>
+     * @param status 完成状态，取值为 {@code STATUS_*} 常量
+     * @throws RuntimeException 发生错误时抛出；异常会<b>被记录但不传播</b>
+     * （注意：此处不要抛出 TransactionException 子类！）
+     * @see #STATUS_COMMITTED
+     * @see #STATUS_ROLLED_BACK
+     * @see #STATUS_UNKNOWN
+     * @see #beforeCompletion
+     */
+    default void afterCompletion(int status) {
+    }
+
+}
+```
 
 
 
@@ -211,12 +448,66 @@ public class TaskConfig {
 
 何为其然也？曰：大部分人在写业务功能的时候，一般是上帝Service类，即业务Service中会有大量的业务代码，其中不乏数据库操作、远程调用服务等。
 
-举个🌰：
+举个坏🌰：
 
 ```java
+    /**
+     * 查询银行审批状态
+     *
+     * @param bizSeq 业务号
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void getBankApprovalResult(String bizSeq) {
+        // 先查询到订单
+        Order order = orderMapper.queryById(bizSeq);
+
+        // 查询银行审批状态
+        BankReponse reponse = bankService.queryResult(order.getBankApplyId);
+
+        // 如果查询失败，直接抛异常
+        if (!reponse.isSuccess()) {
+            throw new RuntimeException();
+        }
+        // 如果成功更新订单表
+        order.setBankApprovalSts("pass");
+        orderMapper.update(order);
+
+        // 发送通知
+        notifyService.sendNotify(order);
+    }
+```
+
+好🌰
+
+```java
+    /**
+     * 查询银行审批状态
+     *
+     * @param bizSeq 业务号
+     */
+    public void getBankApprovalResult(String bizSeq) {
+        // 先查询到订单
+        Order order = orderMapper.queryById(bizSeq);
+
+        // 查询银行审批状态
+        BankReponse reponse = bankService.queryResult(order.getBankApplyId);
+
+        // 如果查询失败，直接抛异常
+        if (!reponse.isSuccess()) {
+            throw new RuntimeException();
+        }
+        // 如果成功更新订单表
+        order.setBankApprovalSts("pass");
+        orderMapper.update(order);
+
+        // 发送通知
+        notifyService.sendNotify(order);
+    }
 
 
 ```
+
+
 
 ###### 事务超时时间
 
@@ -224,7 +515,7 @@ public class TaskConfig {
 
 扩展：几乎在所有的高可用系统中，任何的链接都应该设置超时时间，超时时间会让系统在规定时间内快速失败从而释放资源。没有超时时间/超时时间设计不合理会导致等待，若是业务简单则问题可能被掩盖，一旦并发上来，系统雪崩也会随之而来。
 
-**举个🌰：**
+**举个坏🌰：**
 
 - A线程更新业务123方法执行完成后没有正常提交或者回滚（可能是更新后同步别的系统一直等待响应，或者就是逻辑漏洞）
 
