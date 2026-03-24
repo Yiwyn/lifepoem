@@ -440,11 +440,28 @@ public interface TransactionSynchronization extends Ordered, Flushable {
 
 ##### 事务优化
 
+在复杂业务系统中，事务如果设计不当，往往会导致：
+
+- 长事务
+- 锁竞争
+- 系统吞吐下降
+- 批量任务阻塞
+- 甚至雪崩
+
+因此事务优化通常关注四个核心点：
+
+1. 事务边界控制
+2. 事务超时设计
+3. 事务隔离级别
+4. 批量操作优化
+
+
+
 ###### 事务边界控制
 
 坊间有流传这么一个说法：大厂不推荐使用@Transactional注解。
 
-何为其然也？曰：大部分人在写业务功能的时候，一般是上帝Service类，即业务Service中会有大量的业务代码，其中不乏数据库操作、远程调用服务等。
+何为其然也？曰：大部分人在写业务功能的时候，一般是上帝Service类，即业务Service中会有大量的业务代码，其中不乏数据库操作、远程调用服务等（一个方法里包含：数据库操作、RPC调用、MQ发送、复杂业务逻辑）。
 
 举个坏🌰：
 
@@ -476,6 +493,8 @@ public interface TransactionSynchronization extends Ordered, Flushable {
 ```
 
 好🌰：
+
+缩小事务范围
 
 ```java
     /**
@@ -509,9 +528,19 @@ public interface TransactionSynchronization extends Ordered, Flushable {
 
 更好的🌰：
 
-借用DDD的思想中的一个概念，聚合根和领域仓储，我们要做的是把需要一个事务操作的数据库操作作为一个仓储抽象，而事务的范围则是该仓储实现。
+借用DDD的思想中的一个概念，聚合根和领域仓储，我们要做的是把需要一个事务操作的数据库操作作为一个仓储抽象，而事务的范围则是该仓储实现。DDD事务边界
 
 这类实现会将数据库操作和其他操作进行解耦，`getBankApprovalResult`方法更多是对细分事务的编排（参考领域服务、领域应用服务）可简单参考：[领域驱动设计DDD-理论&实际（更新中） | Yiwyn's ~ShenZhi Blog](https://blog.lifepoem.fun/posts/互联网/设计/领域驱动设计ddd-理论实际/)
+
+```tex
+ApplicationService（编排）
+        ↓
+DomainService（事务）
+        ↓
+Repository
+```
+
+code：
 
 ```java
     /**
@@ -556,9 +585,13 @@ public interface TransactionSynchronization extends Ordered, Flushable {
 
 
 
-###### 事务超时时间
+---
 
-事务连接超时时间一直以为是被大家忽略的问题
+
+
+###### 事务超时时间设计
+
+事务连接超时时间一直以为是被大家忽略的问题（几乎在系统中看不到）
 
 扩展：几乎在所有的高可用系统中，任何的链接都应该设置超时时间，超时时间会让系统在规定时间内快速失败从而释放资源。没有超时时间/超时时间设计不合理会导致等待，若是业务简单则问题可能被掩盖，一旦并发上来，系统雪崩也会随之而来。
 
@@ -574,17 +607,82 @@ public interface TransactionSynchronization extends Ordered, Flushable {
 
 
 
+所以面对以下操作，我们**必须**设置事务超时时间
+
+- 批量数据处理
+- 第三方API调用
+- 大事务
+
+推荐公式：
+
+
+
+工程化一点的版本（推荐用这个） 🚀
+$$
+T_{timeout} = (T_{sql} + N_{rpc} \times T_{rpc} + T_{logic}) \times (1 + J)
+$$
+参数说明：
+
+- **T_sql**：所有 SQL 总耗时平均值
+- **N_rpc**：事务里调用外部服务次数
+- **T_rpc**：一次 RPC / HTTP 平均延迟
+- **T_logic**：业务代码执行时间
+- **J**：系统抖动比例（一般 **0.3 ~ 1.0**）
+
+
+
+---
+
+
+
 ###### 事务隔离
 
-事务隔离是事务的一个特性，我们在开发复杂业务的时候，
+事务隔离是事务的一个特性，我们在开发复杂业务的时候，可能会出现多次更新的情况，如果A线程执行没有结束，可能还会继续更新，但是B线程已经扫描到了这个临时状态，于是就发生了并发问题，对于这种就是**未提交读**。这个时候是需要添加事务，由事务来保证数据有效。
+
+但是，这种场景更建议再数据确认后统一操作，而不是将保存、更新分散到同一个方法的不同位置。
+
+
+
+---
 
 
 
 ###### 批量操作优化
 
+批量操作是最容易出现事务的地方，因为批量操作编写不当就会引起系统的阻塞。
 
+**坏🌰：**
 
+```Java
+@Transactional
+public void batchUpdate(List<Order> list) {
+    for (Order order : list) {
+        orderMapper.update(order);
+    }
+}
+```
 
+当这个业务中的某一个Order更新出现竞争阻塞，整个事务都会被阻塞，而参与到更新还没有提交的业务都会一直持有锁，这个时候只能寄希望于设置超时时间了（巧了和第一点对上了 ，大家一般是不设置超时时间的）
+
+**处理方案：**
+
+降低锁的粒度，尽可能的减少影响
+
+```java
+public void batchUpdate(List<Order> list) {
+
+    List<List<Order>> partitions = Lists.partition(list, 200);
+
+    for (List<Order> batch : partitions) {
+        orderService.batchUpdate(batch);
+    }
+}
+
+@Transactional
+public void batchUpdate(List<Order> batch) {
+    orderMapper.batchUpdate(batch);
+}
+```
 
 
 
