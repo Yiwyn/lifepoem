@@ -65,7 +65,7 @@ public final enum com/yiwyn/enumdemo/base/MsgTypeEnum extends java/lang/Enum {
 
 - 业务代码永远 `new` 不出枚举对象；
 
-  - Java中也限制了枚举对象的构造函数不能为public（使用public定义会报错）
+  - 枚举构造默认 private、禁止 public、构造可重载互调
 
 - 比较枚举直接用 `==`，更加安全
 
@@ -321,9 +321,9 @@ public static void main(String[] args) {
 
 ✅ 数据库只存自定义 code（数字 / 字符串）
 
-✅ 所有业务枚举实现统一 `IEnum` 接口
+✅ 所有业务枚举实现统一 `ICodeEnum` 接口
 
-✅ 必提供 `getByCode` 反向查询方法
+✅ 必提供 `of` 或 `getByCode` 等反向查询方法
 
 ✅ 状态判断优先用 `EnumSet`
 
@@ -369,7 +369,7 @@ public enum ErrorCodeEnum implements ICodeEnum<Integer> {
 }
 ```
 
-我们也可以这样写，这样失败场景的detail就得到了重写。我们可以根据每个
+我们也可以这样写，这样失败场景的detail就得到了重写。我们可以根据每个枚举常量的具体情况，提供不同的实现逻辑。
 
 ```java
 @Getter
