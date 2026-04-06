@@ -6,19 +6,13 @@ tags = ["枚举","Enum"]
 draft = false
 +++
 
-
-
 ### 重新认识枚举（Enum）
 
 > 背景：枚举一直以来是我们常用的常量、状态定义工具。相比于直接使用`int`或者`String`常量，枚举往往更加安全、直观并且更加容易扩展。
 > 为什么提到重新认识枚举？在日常的开发中，我们发现很多场景下枚举(enum)和常量(constant)存在大量混用的情况，尽管功能是实现了，但是后期的扩展和阅读都存在很多问题。
 > 本文将会把枚举相关的知识点做一个重新整理，包括一些进阶用法作实例展示。
->
+> 
 > 本文使用 JDK17
-
-
-
-
 
 #### 从零开始看枚举
 
@@ -52,7 +46,7 @@ public final enum com/yiwyn/enumdemo/base/MsgTypeEnum extends java/lang/Enum {
 
   // access flags 0x4019
   public final static enum Lcom/yiwyn/enumdemo/base/MsgTypeEnum; IMG
-	
+    
 	... 
 }
 ```
@@ -63,11 +57,7 @@ public final enum com/yiwyn/enumdemo/base/MsgTypeEnum extends java/lang/Enum {
 2. 枚举类默认被 `final` 修饰，**不能被继承、重写扩展**；
 3. 每个枚举常量，本质是 `public static final` 的全局单例对象；
 
-
-
 ---
-
-
 
 ##### 2. 加载与单例特性
 
@@ -89,11 +79,7 @@ public final enum com/yiwyn/enumdemo/base/MsgTypeEnum extends java/lang/Enum {
 
     `Enum`类中的`equals()`方法是一个终态方法，它仅会对其参数调用`super.equals()`并返回结果，因此执行的是**引用同一性比较**。
 
-  
-
 ---
-
-
 
 ##### 3. 枚举的基础使用
 
@@ -202,13 +188,10 @@ public class EnumSwitch {
 }
 ```
 
-
-
 ---
 
+##### 4. 枚举的简单扩展
 
-
-##### 4.枚举的简单扩展
 从上文中我们看知道了表示一个枚举的形式有很多，例如 `name()` `ordinal()` 我们`自己扩展的属性`等，但是实际使用的时候我们很少会使用 `name()`和`ordinal()`因为他们通常（相对而言）是不稳定的。所以一般情况下需要我们提供一个例如`getByCode(T code)`的方法，因为我们的`code`通常具有业务意义不会轻易发生改变。
 
 示例：
@@ -265,17 +248,11 @@ public static void main(String[] args) {
 }
 ```
 
-
-
 **【注意】**：如果使用code来获取枚举，则需要保证code唯一，若不唯一则会导致获取到错误的枚举
-
-
 
 ---
 
-
-
-##### 5.EnumSet & EnumMap
+##### 5. EnumSet & EnumMap
 
 1. EnumSet（超高效率集合）
 
@@ -303,7 +280,6 @@ public static void main(String[] args) {
    }
    ```
 
-   
 
 2. EnumMap（枚举当 Key 的高效 Map）
 
@@ -330,16 +306,10 @@ public static void main(String[] args) {
    System.out.println(msgMap.get(MsgTypeEnum.TXT));
    ```
 
-   
-
-
-
 
 ---
 
-
-
-##### 5. 枚举的最佳实践
+##### 6. 枚举的最佳实践
 
 ❌ 严禁用 `ordinal()` 存数据库、接口传参（改顺序全崩）
 
@@ -359,13 +329,7 @@ public static void main(String[] args) {
 
 ✅ 枚举比较一律用 `==`
 
-
-
-
-
 ---
-
-
 
 #### 枚举的高级应用
 
@@ -430,8 +394,6 @@ public enum ErrorCodeEnum implements ICodeEnum<Integer> {
 }
 ```
 
-
-
 ##### 2. 抽象方法
 
 枚举中，你可以将每个枚举对象当成实现，枚举中定义了抽象方法，则每个枚举对象**必须**都需要对该方法进行实现。
@@ -489,11 +451,6 @@ public enum MessageEnum {
     }
 }
 ```
-
-
-
-
-
 
 
 
