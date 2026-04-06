@@ -454,6 +454,197 @@ public enum MessageEnum {
 
 
 
+#### 高阶用法
+
+###### 工厂&策略模式
+
+```java
+package com.yiwyn.enumdemo.advanced.f;
+
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+
+import java.util.Arrays;
+import java.util.Optional;
+
+/**
+ * @className: FMain
+ * @author: Yiwyn
+ * @date: 2026/4/6 18:30
+ * @Version: 1.0
+ * @description:
+ */
+public class FMain {
+
+    /**
+     * 枚举中定义一个接口，并让枚举实例实现该接口
+     */
+    @Getter
+    @RequiredArgsConstructor
+    enum MsgFactory {
+
+        TEXT("text", new TextMsgFactory()),
+        IMG("img", new ImgMsgFactory());
+
+        private final String code;
+        private final baseMsgFactory baseMsgFactory;
+
+
+        public static Optional<MsgFactory> getMsgFactory(String code) {
+            return Arrays.stream(MsgFactory.values()).filter(msgFactory -> msgFactory.getCode().equals(code)).findFirst();
+        }
+
+    }
+
+    /**
+     * 基础消息工厂
+     */
+    static class baseMsgFactory {
+    }
+
+    /**
+     * 文本消息工厂
+     */
+    static class TextMsgFactory extends baseMsgFactory {
+        @Override
+        public String toString() {
+            return "TextMsgFactory";
+        }
+    }
+
+    /**
+     * 图片消息工厂
+     */
+    static class ImgMsgFactory extends baseMsgFactory {
+        @Override
+        public String toString() {
+            return "ImgMsgFactory";
+        }
+    }
+		
+		// 实际使用场景
+    public static void main(String[] args) {
+
+        /*
+         * 根据消息类型获取消息工厂
+         */
+        String msgType = "text";
+        Optional<MsgFactory> msgFactory = MsgFactory.getMsgFactory(msgType);
+        if (msgFactory.isPresent()) {
+            System.out.println(msgFactory.get().getBaseMsgFactory());
+        }
+
+    }
+
+}
+
+```
+
+---
+
+###### 字段提取策略枚举
+
+```java
+@Getter
+@RequiredArgsConstructor
+public enum MessageEnum {
+
+    TEXT("01", jsonObject -> jsonObject.getString("content")),
+    IMAGE("02", jsonObject -> jsonObject.getString("url"));
+
+    private final String code;
+    private final IMessageAble messageAble;
+
+
+    interface IMessageAble {
+        String content(JSONObject contentBody);
+    }
+}
+```
+
+---
+
+###### 错误升级
+
+```java
+@Getter
+@RequiredArgsConstructor
+public enum LeveEnum {
+
+    LOW("低", lt(3)),
+    MIDDLE("中", new LevelPredicate() {
+        @Override
+        public boolean test(int level) {
+            return level <= 5;
+        }
+    }),
+    HIGH("高", gt(5));
+
+    private final String desc;
+    private final LevelPredicate levelPredicate;
+
+
+    /**
+     * 等级判断接口
+     */
+    private interface LevelPredicate {
+        boolean test(int level);
+    }
+
+    /**
+     * 等于
+     *
+     * @param value 值
+     * @return LevelPredicate
+     */
+    private static LevelPredicate eq(int value) {
+        return level -> level == value;
+    }
+
+    /**
+     * 大于
+     *
+     * @param value 值
+     * @return LevelPredicate
+     */
+    private static LevelPredicate gt(int value) {
+        return level -> level > value;
+    }
+
+    /**
+     * 小于
+     *
+     * @param value 值
+     * @return LevelPredicate
+     */
+    private static LevelPredicate lt(int value) {
+        return level -> level < value;
+    }
+
+
+    /**
+     * 根据等级获取枚举
+     *
+     * @param level 等级
+     * @return 枚举
+     */
+    public static LeveEnum valueOfLevel(int level) {
+        for (LeveEnum leveEnum : LeveEnum.values()) {
+            if (leveEnum.levelPredicate.test(level)) {
+                return leveEnum;
+            }
+        }
+        throw new IllegalArgumentException("Invalid level: " + level);
+    }
+
+
+}
+```
+
+
+
+
+
 
 参考文档：
 
