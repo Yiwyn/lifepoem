@@ -13,6 +13,8 @@ draft = false
 > 背景：枚举一直以来是我们常用的常量、状态定义工具。相比于直接使用`int`或者`String`常量，枚举往往更加安全、直观并且更加容易扩展。
 > 为什么提到重新认识枚举？在日常的开发中，我们发现很多场景下枚举(enum)和常量(constant)存在大量混用的情况，尽管功能是实现了，但是后期的扩展和阅读都存在很多问题。
 > 本文将会把枚举相关的知识点做一个重新整理，包括一些进阶用法作实例展示。
+>
+> 本文使用 JDK17
 
 
 
@@ -25,47 +27,75 @@ draft = false
 在Java中，枚举使用`enum`关键字定义，它是一种特殊的类，包含一组固定的常量。
 
 ```java
-// 基础枚举定义
-public enum Color {
-    RED, GREEN, BLUE
-}
-
-// 使用方式
-public class Main {
-    public static void main(String[] args) {
-        Color color = Color.RED;
-        System.out.println(color); // 输出: RED
-    }
+/**
+ * 消息类型枚举
+ */
+public enum MsgTypeEnum {
+    TXT,
+    IMG,;
 }
 ```
 
-##### 2. 枚举 vs 常量：为什么选择枚举？
+编译后如下
 
-让我们对比一下传统的常量定义和枚举定义：
-
-**传统常量方式（不推荐）：**
 ```java
-public class Status {
-    public static final int PENDING = 1;
-    public static final int APPROVED = 2;
-    public static final int REJECTED = 3;
+// class version 61.0 (61)
+// access flags 0x4031
+// signature Ljava/lang/Enum<Lcom/yiwyn/enumdemo/base/MsgTypeEnum;>;
+// declaration: com/yiwyn/enumdemo/base/MsgTypeEnum extends java.lang.Enum<com.yiwyn.enumdemo.base.MsgTypeEnum>
+public final enum com/yiwyn/enumdemo/base/MsgTypeEnum extends java/lang/Enum {
+
+  // compiled from: MsgTypeEnum.java
+
+  // access flags 0x4019
+  public final static enum Lcom/yiwyn/enumdemo/base/MsgTypeEnum; TXT
+
+  // access flags 0x4019
+  public final static enum Lcom/yiwyn/enumdemo/base/MsgTypeEnum; IMG
+	
+	... 
 }
 ```
 
-**枚举方式（推荐）：**
-```java
-public enum Status {
-    PENDING, APPROVED, REJECTED
-}
-```
+结论：
 
-**枚举的优势：**
-- **类型安全**：编译器会检查类型的正确性
-- **可读性强**：代码更直观易懂  
-- **可扩展性**：容易添加新属性和方法
-- **内置方法**：提供`values()`、`valueOf()`等方法
+1. 所有枚举类默认**隐式继承 `java.lang.Enum`**，不能再继承其他类；
+2. 枚举类默认被 `final` 修饰，**不能被继承、重写扩展**；
+3. 每个枚举常量，本质是 `public static final` 的全局单例对象；
 
-##### 3. 枚举的高级特性
+
+
+---
+
+
+
+##### 2. 加载与单例特性
+
+- 枚举常量在**类加载阶段**就完成实例化，JVM 保证全局唯一、天然线程安全；
+
+- 业务代码永远 `new` 不出枚举对象；
+
+  - Java中也限制了枚举对象的构造函数不能为public（使用public定义会报错）
+
+- 比较枚举直接用 `==`，更加安全
+
+  - Because there is only one instance of each enum constant, it is permitted to use the `==` operator in place of the `equals` method when comparing two object references if it is known that at least one of them refers to an enum constant.
+
+    The `equals` method in `Enum` is a `final` method that merely invokes `super.equals` on its argument and returns the result, thus performing an identity comparison.
+
+    【译】
+
+    由于每个枚举常量都仅有一个实例，因此在已知两个对象引用中至少有一个指向枚举常量的情况下，比较这两个引用时，允许使用`==`运算符替代`equals()`方法。
+
+    `Enum`类中的`equals()`方法是一个终态方法，它仅会对其参数调用`super.equals()`并返回结果，因此执行的是**引用同一性比较**。
+
+  
+
+---
+
+
+
+##### 3. 枚举的基础使用
 
 ###### 3.1 带属性的枚举
 
@@ -78,8 +108,8 @@ public enum OrderStatus {
     COMPLETED("已完成", 3),
     CANCELLED("已取消", 4);
 
-    private final String description;
     private final int code;
+    private final String description;
 
     // 枚举构造函数必须是私有的
     private OrderStatus(String description, int code) {
@@ -172,30 +202,164 @@ public class EnumSwitch {
 }
 ```
 
-##### 4. 枚举的最佳实践
 
-1. **命名规范**：枚举名使用单数，常量名使用大写，用下划线分隔
-2. **添加描述**：为枚举值添加有意义的描述
-3. **避免魔法数字**：使用枚举代替数字常量
-4. **线程安全**：枚举天生是线程安全的
-5. **序列化友好**：枚举支持序列化
 
-##### 5. 常见的枚举反模式
+---
 
-**反模式1：使用ordinal()**
+
+
+##### 4.枚举的简单扩展
+从上文中我们看知道了表示一个枚举的形式有很多，例如 `name()` `ordinal()` 我们`自己扩展的属性`等，但是实际使用的时候我们很少会使用 `name()`和`ordinal()`因为他们通常（相对而言）是不稳定的。所以一般情况下需要我们提供一个例如`getByCode(T code)`的方法，因为我们的`code`通常具有业务意义不会轻易发生改变。
+
+示例：
+
 ```java
-// ❌ 不推荐
-int statusIndex = status.ordinal();
+@Getter
+@RequiredArgsConstructor
+public enum MsgTypeEnum {
+    TXT(1, "文本"),
+    IMG(2, "图片"),
+    ;
+    private final Integer code;
+    private final String msg;
 
-// ✅ 推荐
-int statusIndex = status.getCode();
+    /**
+     * 根据代码获取枚举
+     * @param code 代码
+     * @return 枚举
+     */
+    public static MsgTypeEnum of(Integer code) {
+        for (MsgTypeEnum type : values()) {
+            if (type.code.equals(code)) {
+                return type;
+            }
+        }
+        throw new IllegalArgumentException("Invalid code: " + code);
+    }
+}
+
 ```
 
-**反模式2：过度复杂的枚举**
+通过code获取方法这里也推荐另一个写法。使用`Optional<T>`来进行结果的输出，而非使用异常的形式处理无匹配的情况。
+
 ```java
-// ❌ 枚举应该简单，复杂的业务逻辑应该放在单独的类中
-// ✅ 保持枚举简洁，只包含相关的属性和方法
+/**
+ * 根据代码获取枚举
+ *
+ * @param code 代码
+ * @return 枚举
+ */
+public static Optional<MsgTypeEnum> ofOptional(Integer code) {
+    return Arrays.stream(values()).filter(type -> type.code.equals(code)).findFirst();
+}
 ```
+
+```java
+public static void main(String[] args) {
+    // 根据代码获取枚举
+    Optional<MsgTypeEnum> msgTypeEnum = MsgTypeEnum.ofOptional(1);
+    // 判断是否存在该枚举，存在则输出对应消息
+    if (msgTypeEnum.isPresent()) {
+        System.out.println(msgTypeEnum.get().getMsg());
+    }
+}
+```
+
+
+
+**【注意】**：如果使用code来获取枚举，则需要保证code唯一，若不唯一则会导致获取到错误的枚举
+
+
+
+---
+
+
+
+##### 5.EnumSet & EnumMap
+
+1. EnumSet（超高效率集合）
+
+   专为枚举设计，底层是位运算，速度远超普通 HashSet。
+
+   EnumSet 底层是**位掩码（long 二进制位运算）**，不是数组 / 链表 / 哈希表。
+
+   | 对比      | EnumSet                   | HashSet                         |
+   | --------- | ------------------------- | ------------------------------- |
+   | 底层结构  | long 位掩码（位运算）     | HashMap（数组 + 链表 + 红黑树） |
+   | 性能      | 极致快 (O (1) 极简单运算) | 有哈希计算、冲突、扩容          |
+   | 内存占用  | 极小（几个 long 搞定）    | 存大量哈希对象，占用高          |
+   | 有序性    | 按枚举定义 ordinal 顺序   | 无序                            |
+   | 元素限制  | 只能存**同一个枚举**      | 任意对象                        |
+   | Null 支持 | **禁止存 null**           | 允许 null                       |
+
+   ```java
+   public static void main(String[] args) {
+       // 支持发送的消息类型
+       EnumSet<MsgTypeEnum> canSendMsg = EnumSet.of(MsgTypeEnum.TXT, MsgTypeEnum.IMG);
+   
+       if (!canSendMsg.contains(MsgTypeEnum.VOICE)) {
+           System.out.println("不支持发送语音消息");
+       }
+   }
+   ```
+
+   
+
+2. EnumMap（枚举当 Key 的高效 Map）
+
+   EnumMap 是专门给枚举做的 Map，性能吊打 HashMap，但是 Key 必须是枚举。
+
+   | 对比         | EnumMap                         | HashMap                         |
+   | ------------ | ------------------------------- | ------------------------------- |
+   | **Key 要求** | **必须是枚举**                  | 任意对象                        |
+   | **底层结构** | 数组（极快）                    | 数组 + 链表 + 红黑树            |
+   | **性能**     | **极快**（O (1) 常数时间）      | 快，但有哈希冲突、扩容开销      |
+   | **顺序**     | **按枚举定义顺序有序**          | 无序（JDK8 + 偶尔有序但不保证） |
+   | > 内存占用   | 极小                            | 相对高                          |
+   | **空键空值** | **Key 不能为 null**，Value 可以 | Key、Value 都可以 null          |
+   | 使用场景     | 枚举做 Key 时 **首选**          | 通用场景                        |
+
+   代码示例：
+
+   ```java
+   EnumMap<MsgTypeEnum, Boolean> msgMap = new EnumMap<>(MsgTypeEnum.class);
+   msgMap.put(MsgTypeEnum.TXT, true);
+   msgMap.put(MsgTypeEnum.IMG, true);
+   msgMap.put(MsgTypeEnum.VOICE, false);
+   
+   System.out.println(msgMap.get(MsgTypeEnum.TXT));
+   ```
+
+   
+
+
+
+
+---
+
+
+
+##### 5. 枚举的最佳实践
+
+❌ 严禁用 `ordinal()` 存数据库、接口传参（改顺序全崩）
+
+❌ 严禁单纯用 `name()` 做业务持久化（改名全崩）
+
+❌ 枚举字段不写 `final`，破坏不可变性
+
+❌ 在枚举内部写复杂业务逻辑、调用第三方接口
+
+✅ 数据库只存自定义 code（数字 / 字符串）
+
+✅ 所有业务枚举实现统一 `IEnum` 接口
+
+✅ 必提供 `getByCode` 反向查询方法
+
+✅ 状态判断优先用 `EnumSet`
+
+✅ 枚举比较一律用 `==`
+
+
 
 
 
@@ -329,35 +493,15 @@ public enum MessageEnum {
 
 
 
-##### 8. 常见问题与解答
-
-**Q: 如何动态创建枚举值？**
-A: 不能动态创建枚举值，枚举值在编译时就已经确定了。如果需要动态值，可以考虑使用其他模式，如工厂模式。
-
-#### 总结
-
-枚举是Java中一个强大且灵活的特性，正确使用枚举可以大大提高代码的可读性、可维护性和类型安全性。在实际开发中，我们应该：
-
-- 优先使用枚举而不是常量
-- 充分利用枚举的类型安全特性
-- 合理使用枚举的高级特性
-- 遵循枚举的最佳实践
-
-通过重新认识和正确使用枚举，我们可以编写出更加优雅和可靠的Java代码。
-
-
-
-
-
-#### 实战案例
-
-
-
-
 
 
 
 
 
 参考文档：
+
+【0】[Chapter 8. Classes](https://docs.oracle.com/javase/specs/jls/se8/html/jls-8.html#jls-8.9)
+
 【1】 [Java实际开发中, enum枚举用的多吗？ - 知乎](https://www.zhihu.com/question/1913219325743067883/answer/2013160036134834695)
+
+【2】[README - 《Effective Java (高效 Java) 第三版》 - 书栈网 · BookStack](https://www.bookstack.cn/read/effective-java-3rd-chinese/docs-README.md)
