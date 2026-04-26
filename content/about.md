@@ -538,6 +538,59 @@ summary: about
   background-clip: text;
 }
 
+/* ===== 亮色主题适配 ===== */
+@media (prefers-color-scheme: light) {
+  .about-root {
+    --bg-primary: #f8fafc;
+    --bg-card: rgba(241, 245, 249, 0.9);
+    --bg-card-hover: rgba(226, 232, 240, 0.95);
+    --border-glow: rgba(56, 189, 248, 0.2);
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-dim: #94a3b8;
+    --gradient-card: linear-gradient(145deg, rgba(56,189,248,0.06) 0%, rgba(167,139,250,0.04) 100%);
+  }
+  .about-root::before {
+    background:
+      radial-gradient(ellipse at 20% 20%, rgba(56,189,248,0.04) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 80%, rgba(167,139,250,0.04) 0%, transparent 50%),
+      radial-gradient(ellipse at 50% 50%, rgba(244,114,182,0.02) 0%, transparent 70%);
+  }
+  .about-hero .avatar-inner {
+    background: #f1f5f9;
+  }
+  .about-hero .motto {
+    color: var(--text-secondary);
+    background: rgba(167,139,250,0.04);
+  }
+  .strength-num {
+    background: linear-gradient(135deg, #0284c7 0%, #7c3aed 50%, #db2777 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+  }
+  .tech-card {
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .tech-card:hover {
+    box-shadow: 0 4px 16px rgba(56,189,248,0.1);
+  }
+  .tech-tag {
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .strength-item, .article-item, .achieve-card {
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+  .strength-item:hover, .article-item:hover, .achieve-card:hover {
+    box-shadow: 0 4px 16px rgba(56,189,248,0.1);
+  }
+  .timeline-item::before {
+    background: #f8fafc;
+  }
+  .about-footer {
+    border-top-color: rgba(56,189,248,0.15);
+  }
+}
+
 /* ===== 响应式 ===== */
 @media (max-width: 600px) {
   .about-root { padding: 12px; }
@@ -553,7 +606,7 @@ summary: about
   <!-- ===== Hero ===== -->
   <div class="about-hero">
     <div class="avatar-ring">
-      <div class="avatar-inner">🚀</div>
+      <div class="avatar-inner"><img src="https://blog.lifepoem.fun/favicon.png" alt="Yiwyn" style="width:72px;height:72px;border-radius:50%;object-fit:contain;"></div>
     </div>
     <h1>Yiwyn</h1>
     <p class="tagline">Java 后端工程师 · 系统架构设计师 · 技术探索者</p>
@@ -699,7 +752,7 @@ summary: about
       <span>代表文章</span>
     </div>
     <div class="article-list">
-      <a class="article-item" href="/posts/互联网/设计/领域驱动设计ddd-理论&实际/">
+      <a class="article-item" href="/posts/互联网/设计/领域驱动设计ddd-理论实际/">
         <span class="article-badge design">设计</span>
         <div class="article-info">
           <div class="title">领域驱动设计 DDD - 理论 & 实际</div>
