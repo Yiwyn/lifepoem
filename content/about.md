@@ -538,57 +538,59 @@ summary: about
   background-clip: text;
 }
 
-/* ===== 亮色主题适配 ===== */
-@media (prefers-color-scheme: light) {
-  .about-root {
-    --bg-primary: #f8fafc;
-    --bg-card: rgba(241, 245, 249, 0.9);
-    --bg-card-hover: rgba(226, 232, 240, 0.95);
-    --border-glow: rgba(56, 189, 248, 0.2);
-    --text-primary: #0f172a;
-    --text-secondary: #475569;
-    --text-dim: #94a3b8;
-    --gradient-card: linear-gradient(145deg, rgba(56,189,248,0.06) 0%, rgba(167,139,250,0.04) 100%);
-  }
-  .about-root::before {
-    background:
-      radial-gradient(ellipse at 20% 20%, rgba(56,189,248,0.04) 0%, transparent 50%),
-      radial-gradient(ellipse at 80% 80%, rgba(167,139,250,0.04) 0%, transparent 50%),
-      radial-gradient(ellipse at 50% 50%, rgba(244,114,182,0.02) 0%, transparent 70%);
-  }
-  .about-hero .avatar-inner {
-    background: #f1f5f9;
-  }
-  .about-hero .motto {
-    color: var(--text-secondary);
-    background: rgba(167,139,250,0.04);
-  }
-  .strength-num {
-    background: linear-gradient(135deg, #0284c7 0%, #7c3aed 50%, #db2777 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-  }
-  .tech-card {
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-  }
-  .tech-card:hover {
-    box-shadow: 0 4px 16px rgba(56,189,248,0.1);
-  }
-  .tech-tag {
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-  }
-  .strength-item, .article-item, .achieve-card {
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  }
-  .strength-item:hover, .article-item:hover, .achieve-card:hover {
-    box-shadow: 0 4px 16px rgba(56,189,248,0.1);
-  }
-  .timeline-item::before {
-    background: #f8fafc;
-  }
-  .about-footer {
-    border-top-color: rgba(56,189,248,0.15);
-  }
+/* ===== 亮色主题适配（跟随 PaperMod 主题切换） ===== */
+html:not([theme="dark"]) .about-root {
+  --bg-primary: #f8fafc;
+  --bg-card: rgba(241, 245, 249, 0.9);
+  --bg-card-hover: rgba(226, 232, 240, 0.95);
+  --border-glow: rgba(56, 189, 248, 0.2);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-dim: #94a3b8;
+  --gradient-card: linear-gradient(145deg, rgba(56,189,248,0.06) 0%, rgba(167,139,250,0.04) 100%);
+}
+html:not([theme="dark"]) .about-root::before {
+  background:
+    radial-gradient(ellipse at 20% 20%, rgba(56,189,248,0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 80%, rgba(167,139,250,0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 50%, rgba(244,114,182,0.02) 0%, transparent 70%);
+}
+html:not([theme="dark"]) .about-hero .avatar-inner {
+  background: #f1f5f9;
+}
+html:not([theme="dark"]) .about-hero .motto {
+  color: var(--text-secondary);
+  background: rgba(167,139,250,0.04);
+}
+html:not([theme="dark"]) .strength-num {
+  background: linear-gradient(135deg, #0284c7 0%, #7c3aed 50%, #db2777 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+html:not([theme="dark"]) .tech-card {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+html:not([theme="dark"]) .tech-card:hover {
+  box-shadow: 0 4px 16px rgba(56,189,248,0.1);
+}
+html:not([theme="dark"]) .tech-tag {
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+html:not([theme="dark"]) .strength-item,
+html:not([theme="dark"]) .article-item,
+html:not([theme="dark"]) .achieve-card {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+html:not([theme="dark"]) .strength-item:hover,
+html:not([theme="dark"]) .article-item:hover,
+html:not([theme="dark"]) .achieve-card:hover {
+  box-shadow: 0 4px 16px rgba(56,189,248,0.1);
+}
+html:not([theme="dark"]) .timeline-item::before {
+  background: #f8fafc;
+}
+html:not([theme="dark"]) .about-footer {
+  border-top-color: rgba(56,189,248,0.15);
 }
 
 /* ===== 响应式 ===== */
