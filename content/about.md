@@ -611,7 +611,7 @@ html:not([theme="dark"]) .about-footer {
       <div class="avatar-inner"><img src="https://blog.lifepoem.fun/favicon.png" alt="Yiwyn" style="width:72px;height:72px;border-radius:50%;object-fit:contain;"></div>
     </div>
     <h1>Yiwyn</h1>
-    <p class="tagline">Java 后端工程师 · 系统架构设计师 · 技术探索者</p>
+    <p class="tagline">Java 后端工程师 · 系统架构设计师 · AI 工程实践者</p>
     <div class="motto">"生活不止眼前的苟且，还有诗和远方"</div>
     <div class="about-status-bar">
       <div class="status-item">
@@ -638,8 +638,8 @@ html:not([theme="dark"]) .about-footer {
     <div class="strength-list">
       <div class="strength-item">
         <div class="strength-content">
-          <p>一名热爱技术的 Java 后端工程师，专注于<strong style="color:var(--accent-cyan)">系统架构设计</strong>与<strong style="color:var(--accent-purple)">领域驱动设计</strong>的落地实践。善于从复杂业务中抽象出优雅的技术方案，追求代码的简洁与系统的可扩展性。</p>
-          <p style="margin-top:8px;">相信<strong style="color:var(--accent-green)">技术的价值在于解决实际问题</strong>，而非炫技。在这里记录学习与思考，分享工程实践中的设计思路与踩坑经验。</p>
+          <p>一名从后端一路走到架构与产品的工程师，专注于<strong style="color:var(--accent-cyan)">系统架构设计</strong>与<strong style="color:var(--accent-purple)">领域驱动设计</strong>的落地实践。目前在<strong style="color:var(--accent-green)">金融科技</strong>领域负责产品规划，把复杂业务拆成清晰、可交付、可验证的方案。</p>
+          <p style="margin-top:8px;">做过 Java 服务端、Drools 规则引擎，也做过产品路线图与优先级排序，深知"技术上能实现"和"业务上该做"是两回事。相信<strong style="color:var(--accent-pink)">技术的价值在于解决实际问题</strong>，而非炫技。在这里记录学习与思考，分享工程实践中的设计思路与踩坑经验。</p>
         </div>
       </div>
     </div>
@@ -655,7 +655,7 @@ html:not([theme="dark"]) .about-footer {
       <div class="strength-item">
         <span class="strength-num">01</span>
         <div class="strength-content">
-          <h4>架构设计思维</h4>
+          <h4>架构设计与领域建模</h4>
           <p>深入理解 DDD 领域驱动设计，能够将复杂业务拆解为清晰的领域模型；熟悉微服务、工作流引擎等架构模式，具备从 0 到 1 的系统设计能力。</p>
         </div>
       </div>
@@ -663,21 +663,21 @@ html:not([theme="dark"]) .about-footer {
         <span class="strength-num">02</span>
         <div class="strength-content">
           <h4>Java 深度实践</h4>
-          <p>精通 Spring 生态（事务机制、AOP、动态加载），深入掌握反射、注解、字节码增强等底层技术；具备 Drools 规则引擎并发问题排查与调优经验。</p>
+          <p>精通 Spring 生态（事务机制、AOP、动态加载），深入掌握反射、注解、字节码增强等底层技术；有 Drools 规则引擎并发问题排查与调优经验，并将其应用于资金分配等金融规则场景。</p>
         </div>
       </div>
       <div class="strength-item">
         <span class="strength-num">03</span>
         <div class="strength-content">
-          <h4>设计模式与抽象能力</h4>
+          <h4>抽象能力与设计模式</h4>
           <p>善于运用设计模式解决实际问题，如基于注解+事件驱动的字段变更追踪框架、轻量级工作流引擎设计，体现出色的抽象与解耦能力。</p>
         </div>
       </div>
       <div class="strength-item">
         <span class="strength-num">04</span>
         <div class="strength-content">
-          <h4>技术广度与学习力</h4>
-          <p>覆盖云原生（K8s）、AI 开发（Spring AI）、性能优化（JMH、Arthas）等多个领域；持有软考<strong>系统架构设计师</strong>高级认证，持续拓展技术边界。</p>
+          <h4>技术广度与产品视角</h4>
+          <p>覆盖云原生（K8s）、AI 开发（Spring AI、Agent 工程化）、性能优化（JMH、Arthas）等多个领域；目前负责金融业务的产品规划与优先级决策，持有软考<strong>系统架构设计师</strong>高级认证。</p>
         </div>
       </div>
     </div>
@@ -699,7 +699,8 @@ html:not([theme="dark"]) .about-footer {
           <span class="tech-tag orange">Spring Boot</span>
           <span class="tech-tag orange">Spring 事务</span>
           <span class="tech-tag orange">MyBatis</span>
-          <span class="tech-tag orange">反射 & 注解</span>
+          <span class="tech-tag orange">Oracle</span>
+          <span class="tech-tag orange">反射 &amp; 注解</span>
           <span class="tech-tag orange">ByteBuddy</span>
           <span class="tech-tag orange">Drools</span>
         </div>
@@ -707,7 +708,7 @@ html:not([theme="dark"]) .about-footer {
       <div class="tech-card">
         <div class="card-header">
           <span class="card-icon">🏗️</span>
-          <span class="card-label">架构 & 设计</span>
+          <span class="card-label">架构 &amp; 设计</span>
         </div>
         <div class="card-items">
           <span class="tech-tag purple">DDD</span>
@@ -715,12 +716,13 @@ html:not([theme="dark"]) .about-footer {
           <span class="tech-tag purple">设计模式</span>
           <span class="tech-tag purple">工作流引擎</span>
           <span class="tech-tag purple">领域建模</span>
+          <span class="tech-tag purple">幂等设计</span>
         </div>
       </div>
       <div class="tech-card">
         <div class="card-header">
           <span class="card-icon">☁️</span>
-          <span class="card-label">云原生 & 运维</span>
+          <span class="card-label">云原生 &amp; 运维</span>
         </div>
         <div class="card-items">
           <span class="tech-tag cyan">Kubernetes</span>
@@ -734,14 +736,29 @@ html:not([theme="dark"]) .about-footer {
       <div class="tech-card">
         <div class="card-header">
           <span class="card-icon">🤖</span>
-          <span class="card-label">AI & 工具</span>
+          <span class="card-label">AI &amp; 工具</span>
         </div>
         <div class="card-items">
           <span class="tech-tag pink">Spring AI</span>
           <span class="tech-tag pink">Agent 开发</span>
+          <span class="tech-tag pink">Harness 工程</span>
+          <span class="tech-tag pink">上下文工程</span>
           <span class="tech-tag green">JMH</span>
           <span class="tech-tag green">Arthas</span>
           <span class="tech-tag green">Redis</span>
+        </div>
+      </div>
+      <div class="tech-card">
+        <div class="card-header">
+          <span class="card-icon">📐</span>
+          <span class="card-label">产品 &amp; 业务</span>
+        </div>
+        <div class="card-items">
+          <span class="tech-tag green">需求分析</span>
+          <span class="tech-tag green">RICE 优先级</span>
+          <span class="tech-tag green">路线图规划</span>
+          <span class="tech-tag green">金融业务</span>
+          <span class="tech-tag green">车贷场景</span>
         </div>
       </div>
     </div>
@@ -754,11 +771,43 @@ html:not([theme="dark"]) .about-footer {
       <span>代表文章</span>
     </div>
     <div class="article-list">
+      <a class="article-item" href="/posts/互联网/ai/让ai更懂你的项目/">
+        <span class="article-badge ai">AI</span>
+        <div class="article-info">
+          <div class="title">让 AI 更懂你的项目：Harness 工程实践</div>
+          <div class="desc">如何用 AGENTS.md、渐进式披露与机械校验，让 Agent 在每次任务里找得到、验得了</div>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+      <a class="article-item" href="/posts/互联网/知识底座/幂等设计/">
+        <span class="article-badge arch">架构</span>
+        <div class="article-info">
+          <div class="title">幂等设计</div>
+          <div class="desc">从重复请求的本质出发，梳理金融场景下保证幂等性的几种落地手段</div>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
       <a class="article-item" href="/posts/互联网/设计/领域驱动设计ddd-理论实际/">
         <span class="article-badge design">设计</span>
         <div class="article-info">
-          <div class="title">领域驱动设计 DDD - 理论 & 实际</div>
+          <div class="title">领域驱动设计 DDD - 理论 &amp; 实际</div>
           <div class="desc">从核心概念到代码落地，深入解析 DDD 的聚合、充血模型、领域仓储与 MVC 对比</div>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+      <a class="article-item" href="/posts/互联网/ai/hermes-api-server实战/">
+        <span class="article-badge ai">AI</span>
+        <div class="article-info">
+          <div class="title">Hermes API Server 实战</div>
+          <div class="desc">把完整 Agent 运行时暴露为 HTTP 端点，调研配置排障、多轮选型与 Spring AI 集成</div>
+        </div>
+        <span class="article-arrow">→</span>
+      </a>
+      <a class="article-item" href="/posts/互联网/spring/mybatis中mapperxml在spring中动态加载设计/">
+        <span class="article-badge spring">Spring</span>
+        <div class="article-info">
+          <div class="title">MyBatis 中 MapperXML 在 Spring 中动态加载设计</div>
+          <div class="desc">解决规则热更新场景下的 Mapper 加载问题，兼顾性能与可维护性</div>
         </div>
         <span class="article-arrow">→</span>
       </a>
@@ -770,11 +819,11 @@ html:not([theme="dark"]) .about-footer {
         </div>
         <span class="article-arrow">→</span>
       </a>
-      <a class="article-item" href="/posts/互联网/设计/字段变化记录功能-从业务层面到技术层面的设计演进/">
-        <span class="article-badge design">设计</span>
+      <a class="article-item" href="/posts/互联网/java/drools规则并发问题分析/">
+        <span class="article-badge java">Java</span>
         <div class="article-info">
-          <div class="title">字段变化记录功能 - 从业务层面到技术层面的设计演进</div>
-          <div class="desc">基于注解+事件驱动的通用字段变更追踪框架，体现抽象与解耦的设计思想</div>
+          <div class="title">Drools 规则并发问题分析 &amp; 解决方案</div>
+          <div class="desc">深入 Drools 源码，排查规则加载与校验的并发偏差及内存溢出问题</div>
         </div>
         <span class="article-arrow">→</span>
       </a>
@@ -786,19 +835,11 @@ html:not([theme="dark"]) .about-footer {
         </div>
         <span class="article-arrow">→</span>
       </a>
-      <a class="article-item" href="/posts/互联网/java/drools规则并发问题分析/">
-        <span class="article-badge java">Java</span>
+      <a class="article-item" href="/posts/互联网/设计/字段变化记录功能-从业务层面到技术层面的设计演进/">
+        <span class="article-badge design">设计</span>
         <div class="article-info">
-          <div class="title">Drools 规则并发问题分析 & 解决方案</div>
-          <div class="desc">深入 Drools 源码，排查规则加载与校验的并发偏差及内存溢出问题</div>
-        </div>
-        <span class="article-arrow">→</span>
-      </a>
-      <a class="article-item" href="/posts/互联网/spring/springai光速入门/">
-        <span class="article-badge ai">AI</span>
-        <div class="article-info">
-          <div class="title">Spring AI 光速入门</div>
-          <div class="desc">ChatModel、ChatClient、Prompt、Advisors 等 AI 开发核心概念与实战</div>
+          <div class="title">字段变化记录功能 - 从业务层面到技术层面的设计演进</div>
+          <div class="desc">基于注解+事件驱动的通用字段变更追踪框架，体现抽象与解耦的设计思想</div>
         </div>
         <span class="article-arrow">→</span>
       </a>
@@ -818,14 +859,19 @@ html:not([theme="dark"]) .about-footer {
         <div class="achieve-desc">软考高级 · 已认证</div>
       </div>
       <div class="achieve-card done">
+        <div class="achieve-icon">💼</div>
+        <div class="achieve-title">负责产品线规划</div>
+        <div class="achieve-desc">金融科技 · 路线图与优先级</div>
+      </div>
+      <div class="achieve-card done">
         <div class="achieve-icon">🌐</div>
         <div class="achieve-title">独立博客搭建</div>
         <div class="achieve-desc">Hugo + Cloudflare Pages</div>
       </div>
       <div class="achieve-card done">
-        <div class="achieve-icon">📖</div>
-        <div class="achieve-title">技术体系沉淀</div>
-        <div class="achieve-desc">IT 知识库 · 软考备考笔记</div>
+        <div class="achieve-icon">🤖</div>
+        <div class="achieve-title">AI 工程化落地</div>
+        <div class="achieve-desc">Agent 开发 · Harness 工程实践</div>
       </div>
       <div class="achieve-card progress">
         <div class="achieve-icon">📋</div>
@@ -834,13 +880,8 @@ html:not([theme="dark"]) .about-footer {
       </div>
       <div class="achieve-card progress">
         <div class="achieve-icon">✍️</div>
-        <div class="achieve-title">月度高质量文章</div>
-        <div class="achieve-desc">持续输出 · 2026 目标</div>
-      </div>
-      <div class="achieve-card progress">
-        <div class="achieve-icon">🤖</div>
-        <div class="achieve-title">AI 工程化探索</div>
-        <div class="achieve-desc">Spring AI · Agent 开发</div>
+        <div class="achieve-title">持续技术输出</div>
+        <div class="achieve-desc">架构 · AI 工程 · 产品实践</div>
       </div>
     </div>
   </div>
@@ -864,8 +905,8 @@ html:not([theme="dark"]) .about-footer {
       </div>
       <div class="timeline-item">
         <div class="time-label">2026</div>
-        <div class="time-content">AI + 架构双线探索</div>
-        <div class="time-desc">探索 Spring AI 与 Agent 开发，冲击高级项目管理认证，持续高质量输出</div>
+        <div class="time-content">从架构走向产品，AI 工程化落地</div>
+        <div class="time-desc">负责金融业务产品规划与优先级决策；产出 Agent 开发与 Harness 工程实践，把 AI 从「能用」推到「可靠」</div>
       </div>
     </div>
   </div>
