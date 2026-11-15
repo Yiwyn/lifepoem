@@ -1211,5 +1211,3 @@ ReAct、Planning、Reflection 换的是「谁在什么时候做决定」；Tool 
 | Pydantic AI Capability 基类 | 需带类型参数（`AbstractCapability[Any]`）；请求级提示用 `ctx.enqueue(SystemPromptPart(..., scope="request"))`，直接改 `request_context.messages` 不进历史 |
 | Pydantic AI 收尾成功率 | 最后一次输出校验失败时仍会抛 `UsageLimitExceeded`；收尾是概率改善，不是保证 |
 | Spring AI 工具调用额度 | 由 `spring.ai.tools.limits.*` 控制（单工具默认 40、单轮总量默认 150）；与「最多跑几轮」不是一回事 |
-
-> **素材说明**：这篇笔记由一份关于 Agent Loop、ReAct 与 Agent 模式的分享对话（`https://chatgpt.com/share/6af95a0e-6424-83e9-9903-4a44b9f88c17`），加上后续补充的「终止条件与防失控策略」素材整理改写而成。原始素材把防护写成四层（步数 / 时间 / 重复 / Token 预算），这里拆成五层——把「累计 Token 预算」与「单次上下文窗口」分开，并在步数层加了「执行 + 收尾」两段预算。五态响应模型、运行状态分层、上下文治理、结构化 Run 结果、三层归属、幂等与并行、框架对照等，都是整理时补上的工程化内容。
