@@ -8,27 +8,25 @@ draft = false
 
 ### 背景
 
-> 今天的 Agent 框架长得都不一样：Pydantic AI 把它做成节点流，Spring AI 塞进 Advisor 链，LangGraph 画成一张有环的状态图。但把工具注册、Prompt 模板、对话界面一层层剥掉，最里面都是同一个东西——**请求模型，看响应，执行模型要的动作，把结果塞回去，再请求一次，直到该停为止**。
+> 笔者写过几套 Agent Runtime，也翻过不少框架的实现，发现它们外形差得很远：Pydantic AI 把循环做成节点流，Spring AI 塞进 Advisor 链，LangGraph 画成一张有环的图。可剥掉这些外壳，最里面都是同一件事——**请求模型，看响应，执行模型要的动作，把结果塞回去，再请求一次，直到该停为止**。
 >
-> 这个 `while` 简单到几乎不会被当成设计重点：通常只有十几行，藏在 SDK 内部，没人会去读它。但整个 Agent 的行为——跑不跑得起来、跑得对不对、能不能停下来——几乎都由它决定。
+> 这个循环本身并不新。2022 年 10 月 ReAct 那篇论文给出 Thought → Action → Observation 的形状时，Action 还只是模型吐出的一段文本，形如 `Search[某个关键词]`，靠外面的代码用正则识别、执行，再把结果拼回上下文；2023 年 6 月 function calling 把动作变成了结构化的 JSON 请求，省去手工解析；2024 年 11 月 MCP 又把「有哪些工具、怎么调」统一了描述。协议一路在标准化，但**谁去执行、结果怎么送回去、下一轮什么时候停，始终留在应用层**。
 >
-> 笔者写过几套 Agent Runtime，也翻过不少别人的实现，最后落在一个很朴素的判断上：**决定一个 Agent 能不能上生产的，往往不是模型选得多好，而是这个循环被设计成了什么样**。它该跑几轮、靠什么状态往下走、由什么条件叫停——这三件事没有答案，循环就只是一个转得挺热闹的 demo。
->
-> 所以这篇只讲这一个循环：它到底在跑什么、一帧里发生了什么、状态究竟存在哪几层、终止条件为什么才是真正的开关、怎么让它在生产环境里停得下来。也会说清它**不是什么**——把 Agent Loop 讲成「反复请求模型、判断有没有 Tool Call」，是这类文章最容易犯的错。
+> 所以这篇笔记只讲这个循环：它在跑什么、一帧里发生什么、状态存在哪几层、靠什么停、停下来交回什么，最后拿到三个框架里对照一遍。
 
----
+为什么非要有这个循环？因为单次调用解决不了三件事：模型不知道刚产生的工单和生产日志，得靠工具取回来；它说一句「已回填工单」并不算写入，实际操作由外部代码执行；下一步动作还取决于查询结果——查日志之前不知道异常在哪个代码位置，读完源码才能确定复现和验证方向。任务开始时通常无法一次备齐所有信息，只能逐轮获取。
 
-### 讲哪一层：Loop / Runtime / Infrastructure
+当然，也有一次调用直接返回、或由固定工作流处理的场景，不必都写成循环。
 
-Agent 相关的东西常常混成一锅，因为它们确实都长在同一个代码库里。但它们的**归属**不一样，混着讲很容易让人以为「实现一个 Loop 就得顺手把整套基础设施也写一遍」。
+动手之前先划清范围，否则后面很容易把三层东西搅在一起：
 
-| 层次 | 包含什么 | 一句判断标准 |
+| 范围 | 关注什么 | 这篇笔记怎么展开 |
 | :--- | :--- | :--- |
-| **Agent Loop**（执行机制） | 请求模型、解析响应、校验决策、执行动作、更新状态、判断继续或终止 | 去掉它，循环跑不完，或者跑错 |
-| **Agent Runtime**（配套能力） | 状态持久化、上下文治理、超时与重试、预算控制、权限校验、运行观测 | 去掉它，循环能跑，但上不了生产 |
-| **Agent Infrastructure**（基建） | 幂等与事务、分布式调度、多副本一致性、多 Agent 协作 | 去掉它，单机小流量能跑，规模化才出事 |
+| Agent Loop | 请求模型、处理响应、执行动作、更新状态、继续或停止 | 主体内容 |
+| Agent Runtime | 为循环提供权限、上下文、预算、超时、持久化与观测 | 在执行与恢复处说明接口和约定 |
+| 基础设施与外部系统 | 状态存储、调度、并发一致性、外部副作用 | 讨论断点与幂等所需的保证 |
 
-这篇笔记的主线始终是第一层：**一个循环怎么转、靠什么继续、凭什么停**。第二章的上下文治理、第五章末尾的幂等与并行、第六章的框架对照，都属于「Loop 拉出来的配套」，出现时会标明它站在哪一层——**看得见边界，比把边界抹平更有用**。
+三层有交叠，也不意味着基础设施问题只在大流量下出现——一次写入超时重试，就可能产生重复评论。区分它们，是为了说清哪些检查由 Loop 发起，哪些保证需要执行器、存储或外部接口提供。
 
 ---
 
@@ -40,14 +38,14 @@ Agent 相关的东西常常混成一锅，因为它们确实都长在同一个�
 
 | 对比 | 单次 LLM 调用 | Agent Loop |
 | :--- | :--- | :--- |
-| 模型调用次数 | 1 次 | 多轮，直到终止 |
+| 模型调用次数 | 1 次 | 支持多轮；具体任务也可能一次就返回 |
 | 谁推进下一步 | 调用方 | 模型提出决策，Runtime 执行并推进状态 |
 | 外部信息 | 需调用方预先拼进 Prompt | 可在运行中按需获取 |
 | 典型产物 | 一段文本 | 经过若干次工具交互后的结论 |
 
-一句话定义：**Agent Loop 是让 LLM 从「一次性生成答案」变成「多轮自主执行任务」的执行控制机制**——根据当前运行状态发起模型请求，拿到决策后由 Runtime 校验并执行，把结果并入状态，再判断下一步是继续、等待还是结束。
+可以这么定义：Agent Loop 是一个执行控制机制，让 LLM 从「一次性生成答案」变成「多轮自主执行任务」。它运行时做四件事：按当前状态发起模型请求，拿到决策后校验并执行，把结果并入状态，判断下一步是继续、等待还是结束。
 
-注意定义里的三个关键词：**状态**、**决策**、**校验执行**。少了任何一个，都会退化成「一个调工具的 while 循环」。
+实际实现时，需要明确状态存在哪里、如何解释模型响应，以及动作执行前有哪些检查。后面逐步补齐这些部分。
 
 #### 1.2 拆开看，只有五个零件
 
@@ -59,13 +57,15 @@ Agent 相关的东西常常混成一锅，因为它们确实都长在同一个�
 | Observation | 工具执行结果，必须成对回灌给模型才能构成闭环 | `result` → `messages` |
 | 控制策略 | 决定这一轮之后是「继续 / 等待 / 终止」，以及以哪种原因终止 | `continue` / `suspend(state)` / `finish(reason)` |
 
-这里有一条贯穿全文的分工：**LLM 负责提出决策，Runtime 负责控制决策的执行、校验与状态推进**。
+LLM 和 Runtime 的分工是：LLM 提出决策，Runtime 控制决策怎么执行、怎么校验、状态怎么推进。
 
-别把它理解成「模型动脑、Runtime 动手」。Runtime 不只是工具执行器，它还负责权限校验、拦截不该执行的调用、决定要不要重试、切换模型、控制预算、调度子 Agent、以及在必要时强制终止。模型提议转账，Runtime 完全可以拒绝。
+容易误解的一点是把它当成「模型动脑、Runtime 动手」。Runtime 远不只是工具执行器。权限校验、拦截不该执行的调用、决定要不要重试、切换模型、控制预算、调度子 Agent、强制终止，都在它这边。模型提议写入工单，Runtime 可以要求审批，也可以拒绝。
 
-第五个零件（控制策略）最容易被写窄。很多实现把它压缩成一个 `if`：有工具调用就继续，没有就返回——等于把「继续 / 等待 / 终止」三种判断塞进一个 `finished` 布尔值（1.3 末尾正好有这样一个写法）。2.3 会说明为什么它不够，4.3 会说明「等待」这一条是怎么被丢掉的。
+五个零件里，控制策略最容易被写窄。很多实现只区分有无工具调用，无法处理等待审批、输出校验失败等情况。控制分支在 2.3 展开，挂起与结束的区别在 4.3。
 
 #### 1.3 最小骨架
+
+循环落到代码上，只展示主要动作时，可以写成这样：
 
 ```python
 while True:                    # 这里刻意没有上界，原因见下
@@ -78,54 +78,35 @@ while True:                    # 这里刻意没有上界，原因见下
         return response.output  # 唯一出口：模型不再请求工具
 ```
 
-这段代码只有一个出口，就是模型不再请求工具。**如果它每一轮都在请求，循环不会停**——这不是疏忽，是「剥掉终止条件」的直接后果，第五章补的就是这个上界。所以在真实系统里它只配当骨架，不能直接上生产。
+这段代码只有一个出口：模型不再请求工具。它要是每一轮都在请求，循环就停不下来。这不是漏写，是故意省掉终止条件的结果，第五章会把这个上界补上。所以它只是个骨架，真拿去用，得自己加上界。
 
-剥掉这些之后，Loop 只剩三个动作：**请求模型 → 处理响应 → 更新上下文**。展开成一轮迭代是六步：
+骨架剩下三个动作：请求模型、处理响应、更新上下文。一轮迭代展开是六步：
 
-1. 把当前上下文交给 LLM；
-2. 判断响应类型：最终答案、工具调用，还是要求继续；
-3. 有 Tool Call 就由 Runtime 校验并执行（可能多个）；
-4. 把执行结果追加进上下文；
-5. **再次请求模型**，让它基于新信息决定下一步；
-6. 判断是否结束，否则回到第 1 步。
+1. 把当前上下文交给 LLM
+2. 判断响应类型：最终答案、工具调用，还是要求继续
+3. 有工具调用就校验并执行，可能不止一个
+4. 结果写回上下文
+5. 再次请求模型，让它基于新信息决定下一步
+6. 判断是否该结束，不结束就回到第 1 步
 
-除了上界，骨架还省掉了**「等待」**。真实 Runtime 里有一条出口不是「结束」，而是**挂起**——等人工审批、等外部事件、等异步任务回填。它不返回结果，也不继续循环，而是把状态存下来先退出。2.3 会把它作为独立的一种响应补上，5.3 给出完整实现。
+这个骨架还省了两样东西。
 
-**还有一步省得更隐蔽：工具调用消息要成对保存。**
+一是「等待」。真实的 Runtime 有一条出口不叫结束，叫挂起：等人工审批、等外部事件、等异步任务回填。它不返回结果，也不继续循环，而是把状态存好先退出。2.3 会把它补成一种独立响应，5.3 给出完整实现。
 
-上面这段代码为了好读，省略了一个真实协议里不能省的细节。**上下文里不只要保存工具的执行结果，还要保存模型发出的那条工具调用请求**，而且两者必须通过 `tool_call_id` 关联：
+二是工具调用消息要成对保存。
+
+上面那段代码为了好读，把这件事省了。真实协议里，上下文不能只存工具的结果，还要存模型发出的那条调用请求，两者通过 `tool_call_id` 对应（示例用 1.6 的工单）：
 
 ```text
-User:      查询订单 A1001
-Assistant: tool_calls=[{id: "call_1", name: "query_order", args: {...}}]
-Tool:      tool_call_id: "call_1"  →  "已发货，预计明天送达"
-Assistant: 订单已发货，目前不需要催单
+User:      读取工单 INC-2026-1115
+Assistant: tool_calls=[{id: "call_1", name: "read_ticket", args: {...}}]
+Tool:      tool_call_id: "call_1"  →  "导出接口 500，trace_id=tr-7f3a"
+Assistant: 已拿到故障线索，接下来按 trace 查询日志
 ```
 
-如果只把一个裸的 `result` 塞进列表，模型下一轮可能无法把结果对应回它当初发的那个调用，尤其在并行调用多个工具时。所以准确的说法是：
+如果只塞一个裸的 `result` 进列表，模型下一轮可能对不上这是哪次调用的结果，并行调多个工具时尤其明显。
 
-> 模型的工具调用请求和 Runtime 返回的执行结果都属于上下文的一部分，结果必须与原始调用建立关联，不能简单追加一个普通字符串。
-
-好消息是多数框架（Pydantic AI、Spring AI、LangGraph 的 `ToolNode`）已经替你完成这套组装，业务代码不必手写。但你要知道它们在做什么，出问题时才查得下去——「工具明明执行了，模型却说没看到结果」这类 bug，十有八九是这一步没接对。
-
-最后排一个写法上的坑。不少教程为了让骨架「看起来有终止条件」，会写成 `finished = False` 加 `while not finished`，再在 else 分支里置 `True`：
-
-```python
-finished = False
-while not finished:
-    response = llm.generate(messages)
-
-    if response.has_tool_call:
-        result = execute_tool(response.tool_call)
-        messages.append(result)
-    else:
-        finished = True
-        return response.output   # 问题就在这两行
-```
-
-这里的 `finished` 是写后即弃的：唯一一次赋值发生在 `return` 的上一行，循环条件再也读不到它——死代码，只是看着像终止控制。把 `return` 挪到循环外能消掉这个 bug，但消不掉冗余：那时它只是给 `break` 换了个名字，初始 `False`、只在一个分支变 `True`，整段等价于 `while True`。
-
-真正的害处是错觉。读者看到 `while not finished`，会默认循环已经有上界，于是不再追问「模型一直调工具怎么办」。1.2 说「把三种判断塞进一个布尔值」，说的就是这个形状——**终止不能由模型「不再调工具」来兜底，必须由循环外的东西兜底**：累计步数、截止时刻、连续重复的动作集合、累计 Token、单次上下文规模，也就是第五章那五层（L1 步数收尾、L2 时钟、L3 重复、L4 累计预算、L5 单次上下文）。
+多数框架（Pydantic AI、Spring AI、LangGraph 的 `ToolNode`）已经替你把这段组装好了，业务代码不用手写。但出问题的时候得知道它在做什么。「工具明明执行了，模型却说没看到结果」，可以先检查调用与结果是否正确进入了下一次请求。
 
 #### 1.4 一次完整迭代，上下文怎么滚
 
@@ -138,11 +119,11 @@ while not finished:
   → 返回给用户
 ```
 
-两个动作缺一不可：**执行结果必须重新放回上下文，且必须再次请求模型**。这才构成闭环。只执行一次工具就结束，可以算一次很简单的 Agent 行为——模型做了选择，Runtime 执行了动作——但它没有形成多轮迭代的 Loop。这里关心的是后者。
+两个动作缺一不可：执行结果放回上下文，然后再次请求模型。这才算闭环。只执行一次工具就结束，可以说是很简单的 Agent 行为，模型做了选择，Runtime 执行了动作，但它没有形成多轮迭代。这里讨论的是后者。
 
 #### 1.5 `messages` 是核心交互状态，但不是全部状态
 
-很多讲解到这里会说「`messages` 就是 Agent 的唯一状态」。这句话在最简单的 Tool Calling Agent 里近似成立，但放到真实系统里会误导人。**上下文是交互状态，不是运行状态的全集。**
+不少人说 `messages` 就是 Agent 的唯一状态。在最简单的 Tool Calling Agent 里这句话差不多成立，放到真实系统里就会误导人。上下文只是交互状态，不是运行状态的全部。
 
 | 状态层 | 具体内容 | 存在哪 |
 | :--- | :--- | :--- |
@@ -153,9 +134,38 @@ while not finished:
 | 协作状态 | 子 Agent 状态、任务分配、审批结果 | 编排层 / 共享状态 |
 | 运行状态 | 截止时刻、取消信号、run_id、trace | Runtime 上下文 |
 
-前面提到的 Plan-and-Execute、Reflection、Multi-Agent，本身就已经证明了这一点：计划、评估结果、子任务状态都不是 `messages` 能自然承载的东西。它们要么放在图状态（LangGraph 的 `State`）、要么放在 Runtime 的结构化对象里。
+后面会讨论的 Plan-and-Execute、Reflection、Multi-Agent，还会引入计划、评估结果和子任务状态。这些可以写进消息，但 Runtime 要稳定读写它们时，通常需要结构化记录。它们要么放在图状态（LangGraph 的 `State`），要么放在 Runtime 的结构化对象里。
 
-一个实用的判断：**下一次模型请求需要看到的，放 `messages`；下一次 Runtime 决策需要的，放运行状态**。前者是模型的世界，后者是系统的世界。
+一个粗略的分法：下一次模型请求要看到的东西，放 `messages`；下一次 Runtime 做决策要用到的东西，放运行状态。模型只能看到前者，后者得 Runtime 自己存着。
+
+#### 1.6 一个贯穿全文的工单案例
+
+为了对照后面的状态和限制，这里构造一张工单，后面几节会反复用到它：
+
+```text
+工单：INC-2026-1115
+服务：report-service
+现象：v2.8.0 发布后，部分 POST /reports/export 返回 500
+样本：trace_id=tr-7f3a
+任务：定位原因、提出并验证方案，审批后回填工单
+范围：不执行生产发布，不自动关闭工单
+```
+
+读工单后查日志，拿到异常 `TypeError: 'NoneType' object is not subscriptable`、位置 `report_service.py:42` 和部署 revision `a13c9e7`。然后读取对应版本代码，发现下面的逻辑：
+
+```python
+def build_query(payload):
+    filters = payload.get("filters")
+    return {"region": filters["region"]}
+```
+
+请求样本没有传 `filters`。此时可以怀疑 `None` 被当成字典使用，但还需要核对接口约定并复现。若 filters 必填，应补请求校验；本例约定它可以缺省、null 或空对象，region 也允许缺省，因此修复要处理这些输入，并保留有效过滤行为。
+
+案例的后续路径是：复现与验证 → 整理原因和方案 → 等待回填审批 → 写入评论。配套工具设为 `read_ticket`、`search_logs`、`read_source`、`verify_patch`、`update_ticket`。
+
+任务完成条件是形成经过验证的诊断并回填，生产修复仍需评审、集成验证、发布和上线后观测。后面的 `completed` 表示本次 Agent 任务完成，不表示生产故障已经解决。
+
+工单、日志、代码注释里的内容作为分析材料，不能覆盖用户授权或工具执行规则。
 
 ---
 
@@ -177,39 +187,39 @@ while not finished:
               └─ 其他        显式失败，不要默认继续
 ```
 
-比常见的三联图多出来的，正是最容易出问题的地方：**判定响应类型的出口不止两个**，以及**执行工具前的「校验」**（不是模型说要执行就执行）。
+这里把响应处理和运行状态一起纳入判断。除了执行或返回，还需要处理等待和修正；工具执行前也要检查权限与参数。
 
 #### 2.2 两个角色，职责并不对称
 
 | 角色 | 拿到什么 | 产出什么 | 不该做什么 |
 | :--- | :--- | :--- | :--- |
-| LLM | 当前完整上下文 | 一段文本，或一组工具调用请求 | 不自己碰数据库、发 HTTP；也不该由它决定预算、权限和最终是否放行 |
-| Runtime | 模型的响应 | 校验结论、执行结果、状态更新 | 不替模型编造下一步计划；但可以拒绝执行、要求重试、强制终止 |
+| LLM | 本次构造的上下文 | 一段文本，或一组工具调用请求 | 不自己碰数据库、发 HTTP；也不该由它决定预算、权限和最终是否放行 |
+| Runtime | 模型响应、业务与运行状态 | 校验结论、执行结果、状态更新 | 按规则检查和路由，不能把未执行的动作记成成功 |
 
-这张表有一个反直觉的地方：**Runtime 的权力比「执行器」大得多，但它的权力是「否决权」而不是「代笔权」**。它可以拦下一次越权调用、可以把失败包装成 Observation 让模型自己改、可以在预算耗尽时终止；但它不能替模型决定「接下来查哪个订单」。
+Runtime 可以拦截越权调用、把失败反馈给模型，或在预算耗尽时终止。它也可以包含确定性业务规则，例如根据日志里的 revision 限定源码版本，或在回填前检查审批。模型决策与程序路由可以共同组织流程。
 
-这也是为什么「把工具结果 append 进上下文」这一行如此关键：**它是两个角色之间唯一的交接点**。少一次 append，模型下一次请求时看到的还是旧世界；少一次 `llm.generate`，结果就只是一堆躺在列表里的数据，没人据此做决策。
+这也解释了为什么「把工具结果 append 进上下文」这一行这么关键：这是工具执行结果交给下一轮模型判断的地方。少一次 append，模型下一次请求看到的还是旧世界；少一次 `llm.generate`，结果就只是一堆躺在列表里的数据，没人据此做决策。
 
-从状态机角度看：一帧做的事，就是读取运行状态（其中包含 `messages`）、生成一次决策、把决策的后果写回运行状态。所谓 Agent 的行为，就是这些状态转移在多轮里连起来的轨迹。
+从状态机角度看，一帧做的事是：读运行状态（里面有 `messages`），生成一次决策，把决策的后果写回运行状态。Agent 的行为就是这些状态转移在多轮里连起来的轨迹。
 
-#### 2.3 响应不是两类，而是五类
+#### 2.3 从模型响应到五种控制决策
 
-绝大多数教程把响应分成两类：有工具调用、没有工具调用。这个简化在 demo 里够用，但它会在三个地方咬人。
+大多数教程把响应分成两类：有工具调用、没有工具调用。这个简化在 demo 里够用，真写起来会碰到三个问题。
 
-**第一，它无法表达「模型还没做完，但也没要求调工具」。** 真实场景里这种响应并不罕见：
+第一个问题，它没法表达「模型还没做完，但也没要求调工具」。这种响应在真实场景里并不少见：
 
 - 结构化输出要求必须调用 `final_answer` 工具，模型却回了一段普通文本；
 - 响应被 `max_tokens` 截断，状态是 incomplete，框架需要再请求一次续写；
 - 输出校验（schema 或 validator）失败，需要带着错误信息重试；
 - 框架的结束策略判定「还有待处理的工具结果」，需要继续下一轮。
 
-这些情况下，「没有 Tool Call」不等于「可以返回」。
+这些情况下，没有 Tool Call 不等于可以返回。
 
-**第二，它让「空转」变成一个无法描述的 bug。** 如果代码只有两个分支，那么任何不匹配的响应都只能落到 `else` 里被当成最终答案返回——包括那些本该重试的。反过来，如果框架偷偷把「非最终文本」都当成继续，就可能出现永远出不去的循环，而代码里根本找不到对应的分支。
+第二个问题，它让空转变成一个没法描述的 bug。代码只有两个分支，任何不匹配的响应就都落到 `else` 里被当成最终答案返回，包括那些本该重试的。反过来，如果框架偷偷把「非最终文本」都当成继续，就可能出现永远出不去的循环，而代码里根本找不到对应的分支。
 
-**第三，它没有「等一等」这个选项。** 需要人工审批、需要外部回调、需要异步任务回填时，两类模型只能二选一：当成「没说完」继续请求模型（空转烧钱），或者当成「说完了」返回（丢掉半成品）。正确的动作是第三种——挂起。
+第三个问题，它没有「等一等」这个选项。需要人工审批、需要外部回调、需要异步任务回填时，两类模型只能二选一：当成没说完继续请求模型，空转烧钱；或者当成说完了返回，丢掉半成品。正确的动作是第三种，挂起。
 
-所以更准确的模型是五种，加一个兜底：
+这里用五种控制决策描述运行时的处理方式，另加未知类型兜底：
 
 | 状态 | 判据 | 谁决定 | 这一轮之后 | 需要的状态 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -222,7 +232,7 @@ while not finished:
 
 ```python
 if decision.kind == "FINAL":
-    return finish("COMPLETED", decision.output)
+    return evaluate_completion_and_finish(decision.output, state)
 
 if decision.kind == "TOOL_CALLS":
     validate_and_authorize(decision.tool_calls)        # 不是模型说要执行就执行
@@ -249,14 +259,17 @@ if decision.kind == "CONTINUE":
 return finish("UNEXPECTED_RESPONSE", decision.kind)    # 未知类型必须显式处理
 ```
 
-**先说清这五个名字的身份**：它们是这篇文章为了讲清 Runtime 控制流而定义的**抽象决策类型**，不是 OpenAI、Anthropic 或任何供应商的统一响应协议，也不是某个框架的 API 枚举。多数协议里模型只给得出「文本」和「工具调用」两种，剩下几种要靠 Runtime 结合输出校验、业务状态和外部事件自己判定。
+FINAL 表示已有可返回输出，最终状态还要检查任务目标；只完成部分诊断时应交回部分结果，不能仅因模型停止调用工具就标记 completed。5.3 的完成函数负责这项检查。
 
-其中两个尤其容易被误读：
+这五个名字需要说明一下。它们是为了讲清 Runtime 控制流而定义的抽象类型，不是 OpenAI、Anthropic 或哪家供应商的统一响应协议，也不是某个框架的 API 枚举。多数协议里模型只给得出文本和工具调用两种，剩下几种要靠 Runtime 结合输出校验、业务状态和外部事件自己判定。
 
-- **`WAIT` 不是模型能产出的东西**，它是 Runtime 的控制状态。模型不会说「我要挂起」，是 Runtime 判断「缺一个当前拿不到的外部输入」，然后决定停在这里。把它当成一种「模型响应类型」去找对应的 API 字段，是找不到的。
-- **`CONTINUE` 也不能由模型的一句话直接触发**。模型回一句「我还需要进一步分析」，本身不构成有效的继续事件——它必须伴随着实际的状态推进（新的工具调用、新的结构化计划、新的分页游标），否则就落进 `NO_PROGRESS`。**「允许继续」是一个需要被证明的许可，不是一句声明。**
+其中两个容易被误读。
 
-**分类是 Runtime 的责任，不是模型的**——这句话决定了你会把它写成一个 `if`，还是写成一个状态机。
+`WAIT` 是 Runtime 的控制状态。模型可以提出需要审批或外部输入，但是否挂起、挂起前保存什么，由 Runtime 决定，不能把模型说「已经批准」当成有效审批。供应商 API 中未必有对应字段。
+
+`CONTINUE` 也不能由模型一句话触发。模型回一句「我还需要进一步分析」，本身不算有效的继续事件，它得伴随实际的状态推进：新的工具调用、新的结构化计划、新的分页游标，否则就落进 `NO_PROGRESS`。
+
+分类时要同时看响应、校验结果和业务状态。只支持工具与最终输出的实现，也可以不提供独立的 `CONTINUE`。
 
 ##### `RETRY` 和 `CONTINUE` 的边界
 
@@ -265,11 +278,11 @@ return finish("UNEXPECTED_RESPONSE", decision.kind)    # 未知类型必须显�
 | | `RETRY` | `CONTINUE` |
 | :--- | :--- | :--- |
 | 判断的是 | 本次响应**不可用**（校验失败、截断、参数非法） | 本次响应**可用**，但任务没完 |
-| 要不要重发同样的请求 | 要，但带上错误提示 | 不要，继续推进 |
-| 计不计入重试上限 | 计 | 不计，但要计步数 |
+| 下一次请求 | 按错误调整提示、长度或上下文，再请求 | 使用更新后的状态继续请求 |
+| 计不计入重试上限 | 计 | 不计，但计入请求次数 |
 | 典型信号 | schema 报错、`finish_reason=length`、工具参数非法 | 模型给出结构化的下一步、分页还有下一页 |
 
-一句话：**`RETRY` 是「这句不算」，`CONTINUE` 是「这句算了，接着来」。** 所以只有 `CONTINUE` 需要证明状态推进；`RETRY` 需要的是次数上限，因为它本来就不推进状态。
+`RETRY` 是「这句不算」，`CONTINUE` 是「这句算了，接着来」。只有 `CONTINUE` 需要证明状态推进，`RETRY` 需要的是次数上限，它本来就不推进状态。
 
 ##### `RETRY` 本身就分三种，别共用一个计数器
 
@@ -281,7 +294,7 @@ return finish("UNEXPECTED_RESPONSE", decision.kind)    # 未知类型必须显�
 | 响应不可用重试 | schema 校验失败、被 `max_tokens` 截断、工具参数非法 | Runtime | 记 `retry_count`，挂 `MAX_RETRIES` |
 | 工具失败后的模型修正 | 工具返回业务错误，模型换个参数再试 | 模型自己决定，Runtime 只执行 | 不算重试，是一次新的 `TOOL_CALLS` |
 
-混在一起的后果很具体：把 SDK 的网络重试也算进 `retry_count`，一次网络抖动就把业务的重试预算吃掉两次；反过来，把模型「换个参数再来」当成重试来限流，会让它连正常纠错的机会都没有。**只有中间那一行才属于「这一帧不算数」，也才该被 `RETRY` 分支处理。**
+混在一起的后果很具体。把 SDK 的网络重试也算进 `retry_count`，一次网络抖动就吃掉两次业务重试预算；反过来，把模型「换个参数再来」当成重试来限流，它连正常纠错的机会都没有。三行里只有中间那行属于「这一帧不算数」，也只该由 `RETRY` 分支处理。
 
 #### 2.4 上下文不是越长越好
 
@@ -292,15 +305,13 @@ return finish("UNEXPECTED_RESPONSE", decision.kind)    # 未知类型必须显�
 | 手段 | 省下什么 | 代价 / 风险 |
 | :--- | :--- | :--- |
 | 只保留最近的工具结果 | 省掉陈旧的 Observation | 留最近 N 条时必须保证 `tool_call_id` 成对，不能孤零零留一个结果 |
-| 把早期对话压成摘要 | 省掉大量原始文本 | 摘要有损：订单号、金额、错误码这类关键值必须原样保留 |
-| 计划、进度、结论存成结构化状态 | 省掉重复叙述 | 要多维护一份状态，见 1.5 那张表 |
+| 把早期对话压成摘要 | 省掉大量原始文本 | 摘要有损：工单号、trace_id、错误码这类关键值必须原样保留 |
+| 计划、进度、结论存成结构化状态 | 省掉重复叙述 | 要多维护一份状态，就是前面那张状态分层表 |
 | 原始记录归档、按需检索 | 让「完整历史」不进每次请求 | 检索得能命中，否则等于丢了 |
 
-一句话：**运行状态可以比每次发给模型的消息更完整；模型的输入也不等于完整历史。**
+运行状态可以比每次发给模型的消息更完整，模型的输入也不必等于完整历史。
 
-但压缩不能乱来，两个坑要提前防：**摘要丢证据**——被压掉的原始响应在排障时往往正是关键，所以归档要留、`run_id` 要能串起来；**裁剪破坏协议**——切消息时如果切掉了 `Assistant(tool_calls)` 只留下 `Tool` 结果，下一轮请求会直接报错。
-
-> **本节小结**：一帧的核心是「读取状态 → 请求模型 → 解释响应 → 执行动作或处理控制事件 → 更新状态」。Tool Call 与 Tool Result 必须正确关联，状态管理也不该被简化成无限 append。
+压缩不能乱来。有两个坑：一是摘要丢证据，被压掉的原始响应在排障时往往正是关键，所以归档要留，`run_id` 要能串起来；二是裁剪破坏协议，切消息时如果把 `Assistant(tool_calls)` 切掉了、只留下 `Tool` 结果，下一轮请求会直接报错。
 
 ---
 
@@ -308,9 +319,9 @@ return finish("UNEXPECTED_RESPONSE", decision.kind)    # 未知类型必须显�
 
 #### 3.1 四个层次，别放在一起比
 
-ReAct（Reasoning and Acting）让模型交替推理和行动：Thought → Action → Observation → 再次 Thought → Final Answer。它常被直接当成「Agent Loop 的实现」，其实两者处在不同的层。
+ReAct（Reasoning and Acting）让模型交替推理和行动：Thought → Action → Observation → 再次 Thought → Final Answer。它常被直接当成「Agent Loop 的实现」，但两者处在不同的层。
 
-> 图中的 Thought 是论文对推理阶段的概念化表示，**不意味着 Runtime 一定能读到模型的内部推理**。现代模型的思维链未必以独立字段暴露，有的还会被隐藏或摘要。Runtime 能可靠观察到的通常只有三样：模型响应、工具调用请求、工具执行结果——这也是为什么整个循环的设计都围绕这三样，而不是围绕「怎么拿到 Thought」。
+这里的 Thought 是论文对推理阶段的概念化表示，不代表 Runtime 一定能读到模型的内部推理。现代模型的思维链未必以独立字段暴露，有的还会被隐藏或摘要。Runtime 能可靠观察到的通常只有三样：模型响应、工具调用请求、工具执行结果。这也是为什么整个循环围绕这三样设计，而不是围绕「怎么拿到 Thought」。
 
 | 层次 | 概念 | 解决的问题 |
 | :--- | :--- | :--- |
@@ -319,42 +330,42 @@ ReAct（Reasoning and Acting）让模型交替推理和行动：Thought → Acti
 | 动作接口 | Tool Calling | 模型如何表达「我要调这个工具」 |
 | 工程框架 | Pydantic AI / Spring AI / LangGraph | 如何组织模型、工具、状态与控制流 |
 
-**ReAct 是可以在 Loop 里实现的一种交互范式，Loop 是承载它的执行机制。** 而且 Loop 不一定采用 ReAct。
+ReAct 可以在 Loop 里实现，Loop 是承载它的执行机制。Loop 也不一定采用 ReAct。
 
 ```python
 from pydantic_ai import Agent
 
-agent = Agent("openai:your-model", instructions="你是一个订单分析助手")
+agent = Agent("openai:your-model", instructions="你是一个工单分析助手")
 
 @agent.tool_plain
-def query_order(order_id: str) -> str:
-    return f"订单 {order_id} 已发货"
+def read_ticket(ticket_id: str) -> str:
+    return f"工单 {ticket_id}：report-service 导出接口 500，trace_id=tr-7f3a"
 
-result = agent.run_sync("帮我查询订单 A1001 的状态")
+result = agent.run_sync("读取工单 INC-2026-1115 的摘要")
 print(result.output)
 ```
 
-`agent.run_sync()` 内部就是那套循环：请求 LLM → 判定响应 → 有 Tool Call 则执行、回灌、再请求；没有则产出 `End`。想看清节点怎么衔接，用 `agent.iter()` 观察（见 6.1）。
+`agent.run_sync()` 内部就是那套循环：请求 LLM → 判定响应 → 有 Tool Call 则执行、回灌、再请求；没有则产出 `End`。想看清节点怎么衔接，可以用 `agent.iter()` 逐个节点观察，第六章有完整示例。
 
-表里那行「动作接口」值得单独拎出来说，因为它是被混得最厉害的一个——**有工具调用，完全可以没有循环**。下一节就拆这个。
+表里「动作接口」这一行值得单独说，它是被混得最厉害的一个：有工具调用，完全可以没有循环。下一节就拆这个。
 
 #### 3.2 Tool Calling 不是 Loop
 
-Tool Calling 只解决一件事：模型怎么把「我要调这个工具」这个意图表达出来。它不负责定义任务怎么推进、什么时候算完。
+Tool Calling 只解决一件事：模型怎么把「我要调这个工具」这个意图表达出来。它不定义任务怎么推进，也不管什么时候算完。
 
-最直接的证据是：**有工具调用，可以完全没有循环。**
+最直接的证据是，有工具调用，可以完全没有循环。
 
 ```text
 用户提问 → 模型给出 Tool Call → Runtime 执行 → 结果直接交给业务层
 ```
 
-一次就结束，没有第二轮。这种用法很常见——让模型把自然语言转成一次 API 调用参数，剩下的交给业务代码。它是一条直线，不是循环；这个系统可以称为一个极简的 Agent，但它没有 Loop。
+一次就结束，没有第二轮。这种用法很常见：让模型把自然语言转成一次 API 调用参数，剩下的交给业务代码。它是一条直线，不是循环；这个系统可以称为一个极简的 Agent，但它没有 Loop。
 
-还有一种更隐蔽的情况：Spring AI 的 `@Tool(returnDirect = true)` 会让工具结果**直接返回调用方，不再回灌模型**。这也是工具调用流程的一条显式出口。它恰好说明「工具执行完必须再问模型一次」不是协议强制，而是 Runtime 的设计选择——而这个选择，正是 1.4 里「闭环」与「一次调用」的分界线。
+还有一种更隐蔽的情况：Spring AI 的 `@Tool(returnDirect = true)` 会让工具结果直接返回调用方，不再回灌模型。这是工具调用流程的一条显式出口。它也说明「工具执行完必须再问模型一次」不是协议强制，而是 Runtime 的设计选择。这个选择，就是 1.4 里「闭环」和「一次调用」的分界线。
 
-所以两者的关系是：**Tool Calling 提供一个动作事件，Agent Loop 决定这个事件之后要不要再来一轮。** 前者是接口，后者是控制流。
+两者的关系可以这么看：Tool Calling 提供一个动作事件，Agent Loop 决定这个事件之后要不要再来一轮。前者是接口，后者是控制流。
 
-顺带把另一个常见混淆也拆掉：
+还有一个容易混的：固定工作流。
 
 | 架构 | 有没有循环 | 循环条件 |
 | :--- | :--- | :--- |
@@ -362,9 +373,9 @@ Tool Calling 只解决一件事：模型怎么把「我要调这个工具」这�
 | Plan-and-Execute | 有，在执行层 | 计划中还有未完成任务 |
 | Reflection | 有，在生成—评估层 | 评估未通过 |
 
-固定工作流可以被同一个编排 Runtime 调度，但它本身不是 Agent Loop——它没有「回头再跑一次」这件事。**「同一个 Runtime 能实现」不等于「它们是同一个循环」**，这个区分在第六节看 LangGraph 时会再次出现。
+固定工作流可以被同一个编排 Runtime 调度，但它本身不是 Agent Loop，它没有「回头再跑一次」这件事。「同一个 Runtime 能实现」不等于「它们是同一个循环」。这一点到后面看 LangGraph 时还会用到。
 
-三个最常见的误区：
+几处容易搞错的地方：
 
 | 误区 | 正确理解 |
 | :--- | :--- |
@@ -374,7 +385,7 @@ Tool Calling 只解决一件事：模型怎么把「我要调这个工具」这�
 
 #### 3.3 四种「模式」不在同一个分类维度
 
-把 ReAct、Plan-and-Execute、Reflection、Multi-Agent 放进一张表然后说「只是继续条件不同」，是一种很诱人但过度抽象的讲法。它们回答的根本不是同一个问题。
+把 ReAct、Plan-and-Execute、Reflection、Multi-Agent 放进一张表，说「只是继续条件不同」，这种讲法很诱人，但抽象过头了。它们回答的不是同一个问题。
 
 | 概念 | 更准确的定位 | 它回答的问题 |
 | :--- | :--- | :--- |
@@ -392,15 +403,11 @@ Orchestrator（外层编排 / 状态机）
     └── Reviewer Agent     （自己跑一个 Reflection 循环）
 ```
 
-这里不是「一个 Loop 换了几行条件」，而是**多个 Agent 各自的 Loop，加一层负责任务分配和收敛判断的外层编排**。
+这不是「一个 Loop 换几行条件」，而是多个 Agent 各自的 Loop，外面加一层负责任务分配和收敛判断的编排。
 
-所以更准确的说法是：
+不同 Agent 架构可以复用底层的运行原语：请求模型、校验决策、执行动作、更新状态。但整体控制流未必是同一个 Loop。复杂系统通常是多个嵌套循环，外面再套一层状态机或工作流编排。这一点决定了你设计系统时会不会在一个 `while` 里硬塞五种职责。
 
-> 不同 Agent 架构可以复用底层的运行原语——请求模型、校验决策、执行动作、更新状态——但它们的整体控制流未必是同一个 Loop。复杂系统通常是多个嵌套循环，外面再套一层状态机或工作流编排。
-
-这句话看起来只是措辞更谨慎，但它决定了你设计系统时会不会在一个 `while` 里硬塞五种职责。
-
-> **本节小结**：Loop 只有一个运行原语，但可以有多个实例、多层嵌套。ReAct 是范式，Planning 是架构，Reflection 是机制，Multi-Agent 是协作——它们不是同一层的四个选项。
+回到这一章开头：Loop 只有一个运行原语，但可以有多个实例、多层嵌套。ReAct 是范式，Planning 是架构，Reflection 是机制，Multi-Agent 是协作，它们不在同一个层次上。
 
 ---
 
@@ -408,9 +415,9 @@ Orchestrator（外层编排 / 状态机）
 
 #### 4.1 「没有 Tool Call 就结束」是默认约定，不是定义
 
-这个约定之所以好用，是因为在典型 Tool Calling Agent 里，**工具调用是模型要求 Runtime 执行外部动作的信号**：模型还没给最终答案，先把活派出来；Runtime 办完把结果送回去，模型再决定下一步。
+「没有 Tool Call 就结束」这个约定好用，是因为在典型的 Tool Calling Agent 里，工具调用就是模型要求 Runtime 执行外部动作的信号：模型还没给最终答案，先把活派出来；Runtime 办完把结果送回去，模型再决定下一步。
 
-一次完整交互：模型先返回 `{"tool_calls":[{"name":"query_order","arguments":{"order_id":"A1001"}}]}`；Runtime 拿到「已发货，预计明天送达」；结果回灌，模型第二次返回纯文本「订单已发货，目前不需要催单」——没有工具调用，循环结束。
+一次最简单的交互：用户只要求读取工单摘要，模型返回 `{"tool_calls":[{"name":"read_ticket","arguments":{"ticket_id":"INC-2026-1115"}}]}`；Runtime 拿到故障描述和 trace；结果回灌后，模型返回工单摘要，没有工具调用，循环结束。完整排查任务还需要后续查询与验证。
 
 ```python
 while True:
@@ -425,16 +432,16 @@ while True:
     return response.content
 ```
 
-这是一段能跑、也符合协议的写法——注意它没有退回「只 append 一个裸结果」的老写法，工具调用请求和结果是一起进去的。
+这段代码能跑，也符合协议。工具调用请求和结果是一起进去的，没有退回只 append 一个裸结果的老写法。
 
-但它悄悄做了一件事：**把「响应里没有 tool_calls」直接等同于「模型说完了」**。这个等价关系成立，需要两个前提：
+但它默认了一件事：响应里没有 tool_calls，就等于模型说完了。这个等价关系要成立，得有两个前提：
 
 1. 模型只可能产出「调工具」和「说完了」两种响应；
 2. 任何纯文本都是完整的最终答案。
 
-前提 1 在 2.3 已经不成立——结构化输出、截断、校验失败都会产生第三种情况。前提 2 也靠不住：一段被 `max_tokens` 砍断的文本，看起来是纯文本，其实不是答案。
+前提 1 在 2.3 已经不成立，结构化输出、截断、校验失败都会产生第三种情况。前提 2 也靠不住：一段被 `max_tokens` 砍断的文本，看起来是纯文本，其实不是答案。
 
-所以那句常被引用的话要补一个限定：**Loop 的本质不是判断有没有工具调用，而是判断是否达到终止条件；「无 Tool Call」只是最常见的一种默认判定。**
+所以要给这个约定补一个限定：Loop 的本质不是判断有没有工具调用，而是判断是否达到终止条件。无 Tool Call 只是最常见的一种默认判定，不是定义。
 
 #### 4.2 不同架构，继续条件长在不同地方
 
@@ -445,9 +452,9 @@ while True:
 | Reflection | 评估结果未达标 | 生成—评估内循环 | 评估结果、轮次上限 |
 | Multi-Agent | 协作任务尚未完成 | 每个 Agent 各有内循环 | 任务分配、子 Agent 状态、审批 |
 
-注意最后一列：**继续条件越复杂，需要的状态就越多**。这正是 1.5 那张表的由来——`messages` 撑不起计划、评估和协作。
+看最后一列会发现一件事：继续条件越复杂，需要的状态就越多。1.5 那张表就是这么来的，`messages` 撑不起计划、评估和协作。
 
-这张表只比较两件事：循环发生在哪一层、靠什么继续。它不表示这四者处在同一个分类维度上——那正是 3.3 说的问题。
+这张表只比较两件事：循环发生在哪一层，靠什么继续。它不表示这四者处在同一个分类维度上，3.3 说的就是这个。
 
 ```python
 # Reflection：条件不是 Tool Call，而是评估是否通过
@@ -458,33 +465,33 @@ while not evaluation.passed and attempt < MAX_ATTEMPTS:
 return result
 ```
 
-顺带说一句：Reflection 的评估**必须引入客观证据**——编译通过、测试结果、静态扫描、schema 校验——只让模型自评「我觉得更好了」，通常只是把错误换了个说法。
+Reflection 的评估必须引入客观证据，编译通过、测试结果、静态扫描、schema 校验都算。只让模型自己说「我觉得更好了」，通常只是把错误换了个说法。
 
-#### 4.3 终止的三种来源
+#### 4.3 完成、挂起与强制终止
 
-把终止条件拆开看，其实只有三类来源，它们对应完全不同的处理方式：
+离开当前执行循环时，可以区分下面几种情况：
 
 | 来源 | 典型场景 | Runtime 该做什么 |
 | :--- | :--- | :--- |
 | 正常完成 | 得到最终答案、评估通过 | 返回结果，记录 usage |
 | 主动等待 | 需要人工审批、需要外部事件 | 挂起并持久化状态，等事件回来再续跑 |
-| 强制终止 | 超步数、超时、重复动作、超预算 | 返回结构化终止原因 + 已有部分结果 |
+| 强制终止 | 超请求次数、超时、重复动作、超预算 | 返回结构化终止原因 + 已有部分结果 |
 
-对照 2.3 的五种响应就清楚了：`FINAL` 落在第一类，`WAIT` 是第二类，其余几种最终都指向第三类。
+对照 2.3 的五种响应就清楚了：`FINAL` 落在第一类，`WAIT` 是第二类；`TOOL_CALLS`、`RETRY`、`CONTINUE` 继续推进后，仍可能完成、挂起或因限制而终止。
 
-中间那一类最容易被忽略：**Agent Loop 不一定是「跑到底」的，它需要能被安全地暂停和恢复**。这一点在 LangGraph 里体现得最明显（checkpointer + interrupt），在自研 Runtime 里则常常被忘掉，最后变成「审批等了三小时，进程重启，全部重来」。
+中间那一类最容易被忽略。Agent Loop 不一定要跑到底，它得能被安全地暂停和恢复。LangGraph 里这件事做得最明显（checkpointer + interrupt），自研 Runtime 则常常忘掉，最后变成「审批等了三小时，进程重启，全部重来」。
 
-「暂停」和「结束」在实现上差得很远，值得单独列一遍：
+暂停和结束在实现上差得很远：
 
 | | 结束（`FINAL` / 强制终止） | 挂起（`WAIT`） |
 | :--- | :--- | :--- |
 | 任务状态 | 终态，不再继续 | 中间态，等着被唤醒 |
 | 进程 | 可以退出 | 必须能退出，靠持久化恢复 |
 | 返回什么 | 结果或终止原因 | 断点标识（`run_id`）+ 待办 |
-| 谁唤醒 | 不会再有人 | 审批回调、事件、定时任务 |
+| 后续处理 | 依结果交付；需要恢复时另行定义策略 | 审批回调、事件、定时任务按恢复入口继续 |
 | 最常见的错法 | 用 `raise` 代替返回 | 当成「继续」在当前线程里空转 |
 
-> **本节小结**：写循环之前先问「什么情况下必须停」，再问「怎么知道该停了」。前一个问题属于设计，后一个问题属于工程——下一节就是它的答案。
+写循环之前先问「什么情况下必须停」，再问「怎么知道该停了」。前者是设计问题，后者是工程问题，下一章展开后者。
 
 ---
 
@@ -492,256 +499,252 @@ return result
 
 #### 5.1 为什么一层不够
 
-Agent Loop 最常见的生产事故是**死循环**：LLM 反复调用同一个工具，或不断产出新内容却永远不给最终答案。防御必须是多层级的，因为每种「停不下来」的原因根本不同。
+Agent Loop 在生产上出事，最常见的就是死循环：LLM 反复调用同一个工具，或者不断产出新内容却永远不给最终答案。防御必须做多层，因为每种停不下来的原因根本不同。
 
-| 死循环形态 | 表现 | 只靠步数限制能否兜住 |
+| 死循环形态 | 表现 | 只靠请求次数限制能否兜住 |
 | :--- | :--- | :--- |
 | 重复动作型 | 相同工具 + 相同参数被反复调用 | 能挡，但要空转到第 N 步，白白烧预算 |
-| 空转推理型 | 每步都有输出，既不调工具也不给最终答案 | 只能靠步数或时间兜底 |
-| 卡死型 | 某一步工具调用超时或阻塞，循环停在原地 | 步数不增长，步数限制完全失效 |
-| 膨胀型 | 动作各不相同但上下文持续膨胀，逼近窗口上限 | 步数未必触发，需要预算限制 |
+| 空转推理型 | 每步都有输出，既不调工具也不给最终答案 | 只能靠请求次数或时间兜底 |
+| 卡死型 | 某一步工具调用超时或阻塞，循环停在原地 | 请求次数不增长，请求次数限制完全失效 |
+| 膨胀型 | 动作各不相同但上下文持续膨胀，逼近窗口上限 | 请求次数未必触发，需要预算限制 |
 
-第二行值得单独解释一句，因为它和「没有 Tool Call 就结束」看起来矛盾。**在只有两个分支的实现里，这种形态确实不会发生**——没有 Tool Call 就直接返回了。它成立的前提是框架允许「继续」这条路（2.3 的 `CONTINUE` / `RETRY`）：结构化输出要求必须调 `final_answer` 工具、响应被截断需要续写、输出校验失败需要重试。这些情况下，模型会一轮轮产出「不是答案的文本」，而循环一轮轮继续。
+第二行要单独解释一句，它和「没有 Tool Call 就结束」看起来矛盾。只有两个分支的实现里，这种形态确实不会发生，没有 Tool Call 就直接返回了。它成立的前提是框架允许「继续」这条路（2.3 的 `CONTINUE` / `RETRY`）：结构化输出要求必须调 `final_answer` 工具、响应被截断需要续写、输出校验失败需要重试。这些情况下，模型会一轮轮产出「不是答案的文本」，而循环一轮轮继续。
 
-所以更准确的说法是：**空转不是模型的行为，是「允许继续」这条路径没有被约束的后果**。如果框架不允许继续，就不需要防它；一旦允许，就必须有闸门。
+空转不是模型的行为，是「允许继续」这条路径没有被约束的后果。框架不允许继续，就不需要防它；一旦允许，就必须有闸门。
 
-**单一策略无法覆盖所有场景**，这不是防御写得够不够严谨，是维度不够。
+单一策略覆盖不了所有场景。这不是防御写得够不够严谨的问题，是维度不够。
 
 #### 5.2 五层机制
 
-| 防御层 | 策略 | 实现方式 | 触发场景 | 行为 |
-| :--- | :--- | :--- | :--- | :--- |
-| L1 步数 + 收尾 | 正常推进上限，另留收尾请求 | `transition_count` 达上限后进入收尾阶段：摘掉普通工具、只允许输出 | 反复推理不收敛 | 收尾成功则返回结果；仍不收敛返回「请求预算用尽」 |
-| L2 时间限制 | 全局截止时刻 | 换算成 `deadline`，入口检查，并传给每次请求与每次工具 | 某一步工具调用卡死 | 返回「执行超时，任务未完成」 |
-| L3 重复检测 | 按**轮**的动作集合去重 | 连续 N 轮的动作**集合**完全相同才终止 | 死循环重复同一批操作 | 返回「连续多轮动作完全相同」 |
-| L4 累计预算 | Token / 成本上限 | 整个 Run 累计消耗超预算则终止 | 多轮累积导致成本失控 | 返回「Token 预算耗尽」 |
-| L5 单次上下文 | 上下文窗口上限 | **请求之前**估算输入 + 预留输出，超了先压缩 | 上下文逼近窗口上限 | 返回「压缩后仍超出上下文预算」 |
-
-**L4 和 L5 必须分开，这是最常被合并错的一对。** 它们限制的根本不是同一个东西：
-
-| 限制 | 含义 | 解决的问题 | 超限的典型信号 |
+| 防御层 | 策略 | 检查位置 | 触发后的处理 |
 | :--- | :--- | :--- | :--- |
-| L4 累计 Token / 成本 | 整个 Run 消耗的总量 | 成本和资源失控 | 跑了 10 轮，累计 10 万 Token |
-| L5 单次上下文 | 这一次请求发过去的输入规模 | 单次 Prompt 超过窗口，或性能退化 | 每轮上下文都是 10 万 Token |
+| L1 请求次数与收尾 | 普通请求上限，另留收尾请求 | 每次模型请求前 | 普通额度用尽后收尾；收尾仍失败则返回部分结果 |
+| L2 时间限制 | 活跃执行时间上限（5.5 的全局 Deadline）、单次超时与取消 | 入口和模型/工具执行内部 | 超时或取消，记录已有结果 |
+| L3 重复检测 | 按轮比较动作与观察，核对进展 | 本轮结果更新后，下一次可疑动作执行前 | 换路径、收尾或中断，按业务配置 |
+| L4 累计预算 | 整个 Run 的 Token / 成本 | 请求前估算或预留，响应后对账 | 达额度后停止新增消耗 |
+| L5 单次上下文 | 本次输入加输出预留不超窗口 | 请求发送前 | 先裁剪/摘要，仍超限就不发送 |
 
-举个具体的例子：一个 Agent 连续跑 10 轮，每轮输入 1 万 Token。累计消耗到了 10 万，触发的应该是 L4；但每一轮其实只有 1 万，窗口完全装得下。反过来，一个 Agent 只跑 2 轮，但每轮塞了 30 万 Token，L4 可能还没超，L5 早就该拦了。
+L2 说的「活跃执行时间」是循环真正在运行的时间，不含等待审批、等待外部事件的挂起时段。按墙钟计时，会把「审批等了三小时」算成超时；按活跃执行时间，才能表达「任务总共只准跑五分钟」。
 
-这两层的工程含义也不同：L4 是**事后统计**（响应回来才知道用了多少），L5 是**事前预防**（如果能在请求前估算 `count_tokens(messages)`，就不必为一次注定超窗的请求付钱）。框架通常把两者做成不同参数，比如 Pydantic AI 的 `total_tokens_limit` 与 `per_request_input_tokens_limit`（见 6.1）。
+L4 和 L5 限制的是不同东西。连续十轮，每轮输入一万 Token，累计可能已经达到十万，但每次都能装进窗口。反过来，第一次就发送三十万 Token，此前消耗再少也可能超窗。
 
-五层是**并列检查**，不是依次降级。但它们的动作不完全一样，这一点得说清楚：
+累计消耗的实际值要依赖响应 usage 等计费记录，但不是只能事后处理。对硬预算要求，可以在请求前估算并预留，返回后对账；估算误差、缓存价格、fallback 和外部工具费用仍需明确口径。仅在响应后检查，能阻止下一请求，无法撤销本次费用。
 
-| 层 | 触发后做什么 | 真正的终止由谁完成 |
-| :--- | :--- | :--- |
-| L1 | **不终止**，切换到收尾阶段（摘工具、提示收尾） | 收尾失败后由 `MAX_MODEL_REQUESTS` 兜底 |
-| L2 / L3 / L4 / L5 | 直接终止 | 自身 |
+五层可以同时生效，处置优先级也要定义。用户取消、硬时间或费用边界触发后，不能因为还留着收尾请求就继续调用模型。L3 是启发式检查，相同查询也可能是合法轮询；它不能替代 L1、L2、L4 的上限。
 
-L1 是唯一「先降级、后终止」的一层，因为它的目标不是「立刻停下」，而是「让已经做的工作有个交代」——原因见下一小节。
-
-检查位置同样关键：**L1/L2/L4 在每轮迭代入口**，**L5 在请求发出之前**，**L3 在拿到本轮工具调用之后、执行之前**。位置放错，闸门就是事后追认——这一点在 5.3 的代码里逐行对应。
-
-##### L1 为什么必须带一个收尾预算
-
-只设一个「最大步数」，会踩到一个很具体的坑：
+##### L1 为什么要单独留收尾请求
 
 ```text
-第 5 步：模型请求工具 → 工具执行成功 → 数据全都拿到了
-第 6 步入口：已用步数 >= 最大步数 → 直接终止
-结果：用户拿到「任务未完成」，而那批数据一次都没被总结
+最后一次普通请求：模型调用 verify_patch，测试结果返回
+下一次请求前：普通请求次数已经用完
 ```
 
-问题不在闸门本身，而在**「执行预算」和「收尾预算」被合成了一个数**。模型刚把活干完，恰恰是最需要一次请求把结果写成答案的时候，预算却已经用完了。
+如果此时直接停止，刚得到的验证结果没有机会被模型整理。可以留一段独立额度，只用于根据已有信息输出结论。
 
-所以 L1 要拆成两个参数：
+| 参数 | 含义 |
+| :--- | :--- |
+| `MAX_NORMAL_REQUESTS` | 普通阶段最多请求多少次，输出修正也计入 |
+| `FINALIZE_RESERVE` | 独立的收尾请求数，通常为 1 |
+| `MAX_MODEL_REQUESTS` | 上面两项之和，表示总请求硬上限 |
 
-| 参数 | 含义 | 作用 |
-| :--- | :--- | :--- |
-| `MAX_TRANSITIONS` | 允许的**正常推进**次数 | 真正约束「循环转了几圈」 |
-| `FINALIZE_RESERVE` | 额外预留的**收尾请求**数，通常为 1 | 保证干完活之后还有一次机会把结果说出来 |
-| `MAX_MODEL_REQUESTS` | 上面两者之和 | 总请求上限，兜住「收尾也收不干净」的情况 |
+这里统一按请求计数。不能把「有效推进 N 次」当成「请求 N 次」：一次 schema 重试会产生请求，却未取得任务进展。如果按推进次数进入收尾、按 N+1 限总请求，预留的一次可能提前被重试占掉。
 
-进入收尾阶段后做两件事：**把普通工具摘掉**，让模型除了输出没有别的选择；**把剩余次数告诉它**，让它知道该给结论了。这套做法和 Pydantic AI 官方那个 `WrapUpNearRequestLimit` capability 是同一个思路（见 6.1），区别只是它要自己写，而你可以直接做进循环里。
+例如普通额度为 5：先校验失败一次，再读工单、查日志、读代码和验证，共用掉五次。第六次进入独立收尾，报告「方案已验证，工单尚未回填」。收尾阶段去掉普通行动工具，只保留输出通道，提示剩余次数和未完成项。
 
-有一个边界要提前认清：**收尾预算不等于收尾一定成功**。如果最后一次输出仍然校验失败，或者模型死活不肯收尾，最终还是会撞到 `MAX_MODEL_REQUESTS`——这时返回的就该是「任务未完成 + 已有进展」，而不是假装成功。
+收尾并不保证输出合格。最后一次仍可能校验失败；这时返回已有进展与未完成项，不能宣告任务完成。6.1 的 capability 示例就是「接近上限时提前收尾」的做法，同样有这个限制。
 
 #### 5.3 整合进一次循环
 
-下面是示意伪代码。`fingerprint_of` / `normalize` / `update_state` / `build_request` / `estimate_tokens` / `compact_context` 按项目自行实现；`finish()` 与 `suspended()` 共用同一个结果类型，只是 `status` 不同（见 5.7）。
-
-有两个贯穿全段的设计决定，先说在前面：**所有状态只有一个来源 `state`**（不再有「一份 `messages` 变量 + 一份 `state`」）；**所有闸门都在动作发生之前检查**，而不是在结果回来之后追认。
+下面是接口级伪代码。预算、计数器、重复窗口与 pending 操作都在可持久化运行状态中。恢复入口先处理已有操作，避免再生成一次同样的回填请求。
 
 ```python
-from collections import deque
 from time import monotonic
 
-# ── 预算：正常推进与收尾分开算 ──
-MAX_TRANSITIONS = 8        # 正常执行最多推进 8 次
-FINALIZE_RESERVE = 1       # 再多留 1 次请求，专门让模型收尾
-MAX_MODEL_REQUESTS = MAX_TRANSITIONS + FINALIZE_RESERVE
+MAX_NORMAL_REQUESTS = 8
+FINALIZE_RESERVE = 1
+MAX_MODEL_REQUESTS = MAX_NORMAL_REQUESTS + FINALIZE_RESERVE
 MAX_RETRIES = 3
-MAX_WALL_TIME, STEP_TIMEOUT, REQUEST_TIMEOUT = 120, 30, 60
-REPEAT_ROUNDS, REPEAT_WINDOW = 3, 10
+REQUEST_TIMEOUT, STEP_TIMEOUT = 60, 30
+MAX_TOTAL_TOKENS = 200_000
+MAX_CONTEXT_TOKENS = 100_000
+RESERVED_OUTPUT_TOKENS = 4_000
 
-MAX_TOTAL_TOKENS = 200_000       # L4：整个 Run 的累计预算
-MAX_CONTEXT_TOKENS = 100_000     # L5：单次请求的输入上限
-RESERVED_OUTPUT_TOKENS = 4_000   # 给输出留的空间，估算时要加上
 
-deadline = monotonic() + MAX_WALL_TIME
-state = RunState(run_id=run_id, messages=[], usage=RunUsage(), completed=[])
-recent_rounds = deque(maxlen=REPEAT_WINDOW)   # 每轮放一个「动作集合」，不是一个调用
-retry_count = 0        # 只数「本次响应不可用」
-request_count = 0      # Runtime 发起的模型请求
-transition_count = 0   # 有效状态推进（L1 用这个）
+def drive(state, event=None):
+    apply_verified_event(state, event)
+    deadline = monotonic() + state.remaining_active_seconds
 
-def finalizing() -> bool:
-    return transition_count >= MAX_TRANSITIONS
+    while True:
+        # 超时、取消、实际累计预算；异常在应用边界转成统一 Run 结果。
+        enforce_cancel_and_hard_limits(state, deadline, MAX_TOTAL_TOKENS)
 
-while True:
-    # ── 入口闸门：L1 / L2 / L4 ──
-    if request_count >= MAX_MODEL_REQUESTS:
-        return finish("REQUEST_BUDGET", "请求预算用尽，任务未完成", state)
-    if monotonic() >= deadline:
-        return finish("TIMEOUT", "执行超时，任务未完成", state)
-    if state.usage.total_tokens >= MAX_TOTAL_TOKENS:
-        return finish("TOKEN_BUDGET", "Token 预算耗尽", state)
+        if state.pending_operations:
+            if needs_external_input(state):
+                checkpoint_with_remaining_time(state, deadline)
+                return suspended(state.wait_reason, state.run_id, state)
 
-    # ── L5：在请求之前拦，不是响应回来之后追认 ──
-    request = build_request(state, finalize=finalizing())   # 收尾时自动摘掉普通工具
-    if estimate_tokens(request) + RESERVED_OUTPUT_TOKENS > MAX_CONTEXT_TOKENS:
-        request = compact_context(request)                  # 摘要 / 裁剪，见 2.4
+            # 包含权限/参数检查；串行时每个工具重新计算剩余时间。
+            # 使用已保存的 operation_id；失败/未知结果不能计入成功。
+            execute_pending_and_commit_results(
+                state, deadline=deadline, step_timeout=STEP_TIMEOUT,
+            )
+            checkpoint_with_remaining_time(state, deadline)
+            continue
+
+        if state.normal_requests < MAX_NORMAL_REQUESTS:
+            phase = "active"
+        elif state.finalize_requests < FINALIZE_RESERVE:
+            phase = "finalizing"
+        else:
+            return finish("REQUEST_BUDGET", partial_output(state), state)
+
+        request = build_request(state, finalize=(phase == "finalizing"))
         if estimate_tokens(request) + RESERVED_OUTPUT_TOKENS > MAX_CONTEXT_TOKENS:
-            return finish("CONTEXT_TOO_LARGE", "压缩后仍超出上下文预算", state)
-
-    # ── 请求模型：单次超时，且不越过全局 deadline ──
-    request_count += 1
-    response = llm.generate(request, timeout=min(REQUEST_TIMEOUT, deadline - monotonic()))
-    state.usage += response.usage    # 输入 + 输出一起累计，不只记工具那次
-
-    decision = classify_response(response)
-
-    if decision.kind == "FINAL":
-        return finish("COMPLETED", decision.output, state)
-
-    if decision.kind == "TOOL_CALLS":
-        # 收尾阶段还想要工具：回灌提示，把它的路收窄到「只能输出」
-        if finalizing():
-            state.messages.append(assistant_tool_call_message(decision))
-            state.messages.extend(rejected_tool_results(decision, "已进入收尾阶段，请直接给出结论"))
-            continue                 # 不增 transition_count，由 MAX_MODEL_REQUESTS 兜底
-
-        # L3：按「轮」判重 —— 同一批里的三个相同调用是并行，不是死循环
-        batch = frozenset(
-            fingerprint_of(call.name, normalize(call.arguments))
-            for call in decision.tool_calls
-        )
-        recent_rounds.append(batch)
-        if (len(recent_rounds) >= REPEAT_ROUNDS
-                and len(set(list(recent_rounds)[-REPEAT_ROUNDS:])) == 1):
-            return finish("REPEATED_ACTION", "连续多轮动作完全相同，请检查逻辑", state)
-
-        # 协议要求：调用请求与结果成对回灌
-        state.messages.append(assistant_tool_call_message(decision))
+            request = compact_context(request, state)
+            if estimate_tokens(request) + RESERVED_OUTPUT_TOKENS > MAX_CONTEXT_TOKENS:
+                return finish("CONTEXT_TOO_LARGE", partial_output(state), state)
 
         remaining = deadline - monotonic()
         if remaining <= 0:
-            return finish("TIMEOUT", "执行超时，任务未完成", state)
-        results = execute_tools(
-            decision.tool_calls,
-            timeout=min(STEP_TIMEOUT, remaining),      # 工具也受全局 deadline 约束
-            idempotency_key=lambda call: fingerprint_of(
-                run_id, call.name, normalize(call.arguments)
-            ),
-        )
-        state.messages.extend(results)
-        state.completed.extend(describe(c) for c in decision.tool_calls)
-        transition_count += 1
-        continue
+            return finish("TIMEOUT", partial_output(state), state)
 
-    if decision.kind == "WAIT":
-        persist(run_id, state)       # 落盘的就是刚刚更新过的 state，不存在「两份状态」
-        return suspended(decision.reason, run_id, state)
+        # 先预留并保存；即使重启，也不会把已用请求数清零。
+        reserve_request_and_cost(state, request, phase)
+        checkpoint_with_remaining_time(state, deadline)
+        response = llm.generate(request, timeout=min(REQUEST_TIMEOUT, remaining))
+        record_response_and_usage(state, response)
+        checkpoint_with_remaining_time(state, deadline)
+        decision = classify_and_validate(response, state)
 
-    if decision.kind == "RETRY":
-        if retry_count >= MAX_RETRIES:
-            return finish("RETRY_EXHAUSTED", decision.reason, state)
-        retry_count += 1
-        state.messages.append(retry_hint(decision.reason))   # 告诉模型错在哪
-        continue
+        if decision.kind == "FINAL":
+            # 检查证据、验证范围与回填结果；部分输出不能标为 completed。
+            return evaluate_completion_and_finish(decision.output, state)
 
-    if decision.kind == "CONTINUE":
-        # 允许继续，但必须证明状态有推进，否则就是空转
-        if not update_state(state, decision):
-            return finish("NO_PROGRESS", "响应未推进任何状态", state)
-        transition_count += 1
-        continue
+        if decision.kind == "TOOL_CALLS":
+            if phase == "finalizing":
+                return finish("FINALIZE_TOOL_REQUEST", partial_output(state), state)
+            validate_and_authorize(decision.tool_calls, state)
+            if repeated_without_progress(state, decision.tool_calls):
+                return finish("REPEATED_ACTION", partial_output(state), state)
+            # 保存完整调用、具体参数、稳定操作 ID、审批条件，然后才执行。
+            stage_operations_with_stable_ids(state, decision)
 
-    # 未知响应：显式失败，不要默默回到循环入口
-    return finish("UNEXPECTED_RESPONSE", f"无法处理的响应类型：{decision.kind}", state)
+        elif decision.kind == "WAIT":
+            stage_wait_condition(state, decision)
+            checkpoint_with_remaining_time(state, deadline)
+            return suspended(decision.reason, state.run_id, state)
+
+        elif decision.kind == "RETRY":
+            if phase == "finalizing" or state.retry_count >= MAX_RETRIES:
+                return finish("RETRY_EXHAUSTED", partial_output(state), state)
+            state.retry_count += 1
+            state.messages.append(retry_hint(decision.reason))
+
+        elif decision.kind == "CONTINUE":
+            if not update_state(state, decision):
+                return finish("NO_PROGRESS", partial_output(state), state)
+            state.transition_count += 1
+
+        else:
+            return finish("UNEXPECTED_RESPONSE", decision.kind, state)
+
+        checkpoint_with_remaining_time(state, deadline)
 ```
 
-这份代码里有十处不那么直观，每一处都对应一个具体的坑——其中前四处是**控制流本身的漏洞**，不是风格问题：
+几个辅助函数需要明确约定：
 
-| 这一版的做法 | 修掉的坑 |
+- `reserve_request_and_cost` 增加本阶段请求数、总请求数并预留消耗。普通修正占普通额度，不能动用收尾额度。
+- `record_response_and_usage` 保存模型响应及协议字段。工具执行函数按调用 ID 写回结果，并分别记录成功、失败和结果未知。
+- `execute_pending_and_commit_results` 逐项核对权限、审批、剩余时间与已知结果。实际取得进展时才增加 `transition_count`，成功记录不能包含失败操作。
+- `repeated_without_progress` 按批次检查动作及已有观察，保留有语义的次数和顺序；合法轮询另设策略。
+- `checkpoint_with_remaining_time` 保存状态和剩余活跃时间。恢复重建当前进程 deadline，另检查持久化的任务过期时间。
+
+请求发出前保存额度是一种保守策略。进程可能在保存后、发送前退出，从而损失一次额度，但不会在恢复时多出一次请求。要精确核查，可以额外维护请求尝试记录与供应商关联 ID。
+
+`estimate_tokens` 只是估算。工具 schema、多模态输入、输出预留都要考虑；压缩若调用模型，其时间和费用也需入账。请求前的预算检查与响应后的 usage 对账各有用途。
+
+##### 挂起与恢复还需要哪些状态
+
+保存消息不等于保存执行位置。至少还要保留：
+
+| 状态 | 作用 |
 | :--- | :--- |
-| L3 用「每轮一个 `frozenset`」判重 | 按单个调用判重时，模型一次并行发三个相同的 `query_order(A1001)` 会被误判成死循环，其实那是同一批合法请求 |
-| L1 用 `MAX_MODEL_REQUESTS = 正常轮数 + 收尾预留` | 只设一个最大步数，会在「工具刚执行完、数据刚拿到」的下一轮入口掐断，结果永远没机会被总结 |
-| L5 在 `llm.generate` **之前**估算并压缩 | 响应回来才检查，那次超窗请求已经发出、已经计费，甚至已经报错 |
-| 工具 `timeout=min(STEP_TIMEOUT, remaining)` | 全局只剩 1 秒、单工具 30 秒时，工具仍会跑满 30 秒，deadline 形同虚设 |
-| 只有一份 `state`，`messages` 挂在里面 | 两份状态并存时，`messages` 更新了而 `state` 没更新，`persist` 存下的是旧快照，恢复后丢掉最后一轮 |
-| `transition_count` 而不是 `step` | 名字叫「最大步数」却不统计所有轮次，读代码的人会以为它管住了全部循环 |
-| 收尾阶段收到 `TOOL_CALLS` 只回灌提示、不执行 | 直接执行会真的跑出去；直接终止又太粗暴，回灌提示能让模型自己转成输出 |
-| `RETRY` 不增 `transition_count`，只增 `retry_count` | 一是让重试吃掉正常预算，二是让空转伪装成重试 |
-| `usage` 每次响应都累加 | 只在工具执行后统计，最终答案、输入 Token、重试开销全漏 |
-| 未识别响应走 `finish("UNEXPECTED_RESPONSE")` | 没有 else 分支时，会带着没更新的上下文回到入口，形成真空转 |
+| run_id、版本、阶段、任务进度和证据引用 | 确认恢复的是哪个任务、哪个位置 |
+| pending 操作、operation_id、具体参数和执行结果 | 先核查或继续原操作，不重新生成 |
+| 审批条件、审批记录、参数版本 | 防止审批内容与实际执行内容不同 |
+| 普通/收尾请求数、修正次数、消耗、重复窗口 | 恢复后限制不重置 |
+| 剩余活跃时间与绝对过期时间 | 按既定时间策略继续执行 |
 
-还有两点是代码表达不出来的，但落地时必须知道：
+本例可以约定等待审批不消耗活跃执行额度，但任务仍会过期。进程内用单调时钟，持久化时保存剩余额度；不把旧进程的单调时钟绝对读数当成通用的跨重启 deadline。多工作进程恢复还需要租约或状态版本条件，避免同时推进。
 
-- **`estimate_tokens` 是估算，不等于供应商的计费口径。** 不同模型的分词器不同，多模态输入、工具 schema 也会占 token。所以 `RESERVED_OUTPUT_TOKENS` 要留够余量，估算值只能当「提前预警」，不能当「精确账单」——真实用量仍以响应里的 `usage` 为准。
-- **`timeout` 参数只能结束「等待」，不一定能结束「执行」。** 同步工具跑在工作线程里，超时之后那个线程可能还在跑，甚至稍后把副作用落了盘。真正要中断，得靠支持取消的执行器；否则就要靠幂等键兜（见 5.8）。
+##### 工单案例：诊断与验证
 
-#### 5.4 五个计数器，两类用途
+把上面这套流程用 1.6 的工单跑一遍，修复可以写成：
 
-很多实现只有一个 `iteration` 计数器，能跑通 demo，但一上量就同时出现漏判和误伤。问题在于它把「数什么」和「给谁看」混成了一件事。
+```python
+def build_query(payload):
+    filters = payload.get("filters")
+    if filters is None:
+        filters = {}
+    if not isinstance(filters, dict):
+        raise ValueError("filters must be an object or null")
 
-**控制用的三个**——它们会触发终止，口径必须精确：
+    region = filters.get("region")
+    if region is not None and (not isinstance(region, str) or not region.strip()):
+        raise ValueError("region must be a nonempty string")
+    return {} if region is None else {"region": region}
+```
 
-| 计数器 | 数什么 | 挂哪个上限 | 数错的后果 |
-| :--- | :--- | :--- | :--- |
-| `transition_count` | 有效状态推进：工具执行完、`CONTINUE` 确有推进 | `MAX_TRANSITIONS` | 用工具调用数代替，纯文本空转永远不触发 |
-| `request_count` | **Runtime 发起**的模型请求次数 | `MAX_MODEL_REQUESTS`（正常轮数 + 收尾预留） | 用它替代 `transition_count`，重试会吃掉正常预算 |
-| `retry_count` | 「本次响应不可用」的重试（见 2.3 的三种重试） | `MAX_RETRIES` | 把传输层重试也算进来，一次网络抖动吃掉两次业务预算 |
+验证应覆盖 filters 缺省、null、空字典、有效 region、region 缺省、错误 filters 类型和空 region。前几项验证异常路径，保留有效 region 的用例用于检查原有行为没有被破坏。
 
-**观测用的两个**——它们不该直接当闸门，但决定了你的阈值调得对不对：
+这些用例只验证函数语义，HTTP 4xx 映射、查询构造和数据库集成仍要补测。只有实际执行后，回填时才能写「七项通过」；未执行就列为待验证。
 
-| 指标 | 数什么 | 为什么不能拿来当闸门 |
+```text
+原因：trace tr-7f3a 指向 a13c9e7 的 filters 字典读取，缺省/null 可复现。
+方案：处理可选字段，保留 region 过滤，补充参数校验。
+验证：记录本地七项用例的环境、代码版本与结果。
+后续：评审、集成验证、发布和上线后观测。
+状态：待发布与生产验证。
+```
+
+这份记录还缺一样东西：请求了几次、工具调了几次、总共花了多少。5.4 补的就是这个。
+
+#### 5.4 计数口径与运行观测
+
+一个 `iteration` 很难同时表示请求、工具调用和任务进展，最好分开记录。
+
+| 计数 | 数什么 | 用途 |
 | :--- | :--- | :--- |
-| `tool_call_count` | 模型提出的工具调用数量（一次响应可并发多个） | 与 `transition_count` 不是 1:1；串行三个工具算 1 还是 3 取决于实现 |
-| `provider_attempts` | 供应商侧实际尝试次数，含 HTTP 重试与 fallback | **只有模型客户端知道**；外层计数器数不到，硬数就会把网络问题算成业务轮数 |
+| `normal_requests` / `finalize_requests` | 普通与收尾模型请求 | 各自限制，隔离预留额度 |
+| `request_count` | Runtime 发起的总模型请求 | 核对总上限，统计开销 |
+| `retry_count` | 输出不可用后的修正 | 限制修正次数，不混入 SDK 网络重试 |
+| `transition_count` | 可验证的任务进展 | 观测效率，也可另设任务推进策略 |
+| `tool_call_count` | 模型提出或实际执行的工具数，需注明口径 | 控制工具额度，观察并行度 |
+| `provider_attempts` | 含 HTTP 重试和 fallback 的实际尝试 | 客户端或网关观测，可另设限制 |
 
-这里最容易错的是最后一行。`llm.generate()` 内部可能已经重试了三次，但外层 `request_count += 1` 只加了一次——这不是 bug，而是两个不同层级的指标。想要 `provider_attempts`，得从模型客户端或网关的观测数据里取，不能指望循环自己数出来。
+`llm.generate()` 内部重试三次，外层 `request_count` 仍可能只增加一次。供应商尝试数需要客户端上报，不能从外层循环猜。工具调用数也不是模型请求数：一次响应可以有多个工具调用。
 
-一句话原则：**L1 数「循环转了几圈」，不要数「调了几次模型」或「跑了几次工具」；而「供应商试了几次」只能由客户端上报，不能靠外层猜。**
+这些数量都可以按业务需要设置上限，但不能相互替代。特别是用「取得了几次进展」替代请求限制，会漏掉一直请求却没有进展的情况。
 
-还有一个容易被忽略的用法：**这几个指标的比值本身就是诊断信号。**
+| 比值 | 持续偏高时可以检查什么 |
+| :--- | :--- |
+| `request_count / transition_count` | 输出修正、空转或进展判定是否异常 |
+| `tool_call_count / request_count` | 单次响应的调用量、并发策略与工具额度 |
+| `provider_attempts / request_count` | 网络、供应商错误与重试策略 |
 
-| 比值 | 持续偏高说明什么 | 该调哪里 |
-| :--- | :--- | :--- |
-| `request_count / transition_count` | 重试或空转在变多，正常推进效率低 | 查 `RETRY` 来源，或收紧 `NO_PROGRESS` 判定 |
-| `tool_call_count / transition_count` | 并行度高，一轮里塞了很多调用 | L3 的按轮判重更安全；并发执行策略要检查（见 5.8） |
-| `provider_attempts / request_count` | 网络或供应商侧不稳 | 这不是业务问题，别去调 `MAX_TRANSITIONS` |
-
-没有这套比值，你只能看到「任务被拦下了」，看不到「为什么被拦下」——而后者才是调阈值的依据。
+分母为零时单独处理。比值用于定位现象，阈值还要结合任务类型和实际轨迹判断。
 
 #### 5.5 时间限制的真实边界
 
-把 `if monotonic() - start > MAX_WALL_TIME` 叫作「全局超时」，容易让人以为它能兜住一切卡死。它不能。
+入口那行 `if monotonic() - start > MAX_WALL_TIME` 看上去能兜住一切卡死。它不能。
 
-这个判断只在**控制权回到循环入口**时才会执行。如果 `llm.generate()` 本身阻塞了十分钟，或者某个工具调用永远不返回，代码根本走不到那行 `if`——循环入口的检查再严密也没用。
+这个判断只在**控制权回到循环入口**时才会执行。如果 `llm.generate()` 本身阻塞了十分钟，或者某个工具调用永远不返回，代码根本走不到那行 `if`。循环入口的检查再严密也没用。
 
-真正要配的是三层，缺一不可：
+真正要配的是三层时间限制，再加一个向下传递的取消信号：
 
 | 层级 | 管什么 | 怎么实现 |
 | :--- | :--- | :--- |
-| 全局 Deadline | 整个 Run 的总时长 | 开始时算出 `deadline`，每轮入口检查，并作为下面两层的时间上界 |
+| 全局 Deadline | 整个 Run 的活跃执行时间 | 开始时算出 `deadline`，每轮入口检查，并作为下面两层的时间上界 |
 | 单次模型请求 Timeout | 一次 API 调用的阻塞 | 传给模型客户端的 `timeout`，取 `min(REQUEST_TIMEOUT, deadline - now)` |
 | 单次工具 Timeout | 一次工具执行的阻塞 | 执行器的 timeout 参数，同样取 `min(STEP_TIMEOUT, deadline - now)` |
 | 取消信号 | 外部要求中断 | 取消令牌 / `CancellationToken` / 进程级中断，向下传递 |
@@ -758,19 +761,19 @@ results = execute_tools(
 )
 ```
 
-只写 `timeout=STEP_TIMEOUT` 会发生什么：全局只剩 1 秒，单工具上限 30 秒，那个工具照样跑满 30 秒——**入口检查得再勤，也拦不住已经冲出去的那一步**。三层超时如果不同源，最短的那一层才是真实上限，其他的只是文档。
+只写 `timeout=STEP_TIMEOUT` 会发生什么：全局只剩 1 秒，单工具上限 30 秒，那个工具照样跑满 30 秒。入口检查得再勤，也拦不住已经冲出去的那一步。这些限制必须在相应执行层实际生效，并共同服从全局剩余时间。
 
 Pydantic AI 的 `timeout=` 就是这个思路：run 级 deadline 会传给子 Agent，子 Agent 自己的 `timeout=` 只能把它缩短、不能延长。
 
-还有一点常被忽略：**超时之后，任务未必该被判为失败**。一次工具调用超时，可能只是响应慢，也可能工具已经执行成功了（见 5.8 第三小节）。前者可以重试，后者重试就是灾难。
+还有一点常被忽略：**超时之后，任务未必该被判为失败**。一次工具调用超时，可能只是响应慢，也可能工具其实已经执行成功了。前者可以重试，后者重试就是灾难，这一点在讲幂等时还会展开。
 
 #### 5.6 停下来之后交回什么
 
-> 这一节已经跨到 **Runtime 层**。Loop 只负责判断「该停了」，而「停下来交回什么」是 Runtime 的接口约定——它不影响循环能不能跑对，但决定了循环跑完之后还有没有价值。
+这一节已经跨到 Runtime 层。Loop 只负责判断该停了，而停下来交回什么是 Runtime 的接口约定。它不影响循环跑得对不对，但决定了循环跑完之后还有没有价值。
 
-前面五层都在讲「怎么停」，这里讲最后一环。这件事如果一开始没设计，最后一定长这样：超时了 `raise TimeoutError`，步数超了 `return None`，上层 catch 一下记条日志——用户等了五轮，拿到一句「出错了」。
+前面五层都在讲「怎么停」，这里讲最后一环。这件事如果一开始没设计，最后一定长这样：超时了 `raise TimeoutError`，请求次数超了 `return None`，上层 catch 一下记条日志。用户等了五轮，拿到一句「出错了」。
 
-建议应用层统一一个 Run 结果结构，**正常完成、被拦下、挂起都走它**：
+建议应用层统一一个 Run 结果结构，正常完成、被拦下、挂起都走它：
 
 ```json
 {
@@ -778,8 +781,8 @@ Pydantic AI 的 `timeout=` 就是这个思路：run 级 deadline 会传给子 Ag
   "termination_reason": "REQUEST_BUDGET",
   "output": null,
   "run_id": "run_01HX...",
-  "completed": ["query_order(A1001)", "query_logistics(A1001)"],
-  "pending": ["notify_customer"],
+  "completed": ["read_ticket(INC-2026-1115)", "search_logs(tr-7f3a)"],
+  "pending": ["update_ticket"],
   "messages_ref": "s3://.../run_01HX/messages.jsonl",
   "usage": {
     "model_requests": 5,
@@ -801,109 +804,63 @@ Pydantic AI 的 `timeout=` 就是这个思路：run 级 deadline 会传给子 Ag
 | `failed` | 不可恢复错误 | `UNEXPECTED_RESPONSE` / `RETRY_EXHAUSTED` |
 | `cancelled` | 用户或上游主动取消 | `CANCELLED` |
 
-三个细节值得单独说：
+有三个细节：
 
-- **`completed` 和 `interrupted` 必须分得开。** 监控上这是两个完全不同的指标：前者是成功率，后者是防护触发率。混在一起，你永远不知道闸门是不是设得太紧——把正常完成算进「被拦下」，会让人误以为限流过严；反过来，被拦下也算成功，防护就形同虚设。
-- **失败要带得回进展。** `completed` / `pending` 两个字段看着朴素，却是「半成品有没有价值」的关键：用户拿到「已查到订单和物流，还没来得及通知客户」，比拿到「任务失败」有用得多。
-- **`suspended` 必须带 `run_id` 和断点。** 没有它，「等审批」就等于「从头再来」——这正是 4.3 说的那类事故。
+- **`completed` 和 `interrupted` 必须分得开。** 监控上这是两个完全不同的指标：前者是成功率，后者是防护触发率。混在一起，你永远不知道闸门是不是设得太紧。把正常完成算进「被拦下」，会让人误以为限流过严；反过来，被拦下也算成功，防护就形同虚设。
+- **失败要带得回进展。** `completed` / `pending` 两个字段看着朴素，却是「半成品有没有价值」的关键：用户拿到「已找到相关日志和代码，尚未回填工单」，比拿到「任务失败」有用得多。
+- **`suspended` 必须带 `run_id` 和断点。** 没有它，「等审批」就等于「从头再来」，这正是 4.3 说的那类事故。
 
-还有一层分寸要拿捏：**「所有强制终止都返回结构化结果」是应用层规范，不能要求框架内部也这样。** Pydantic AI 用异常 `UsageLimitExceeded`，LangGraph 用 `GraphRecursionError`，这是它们的接口约定。你的 Runtime 该做的是在自己的边界上把这两类异常翻译成统一结果，而不是要求框架改行为。
+5.3 末尾那个工单案例正好落在这条线上：本地七项用例通过、结果已回填，本次 Run 返回 `completed`，而生产工单仍是待发布状态；如果预算在回填前耗尽，返回值就该是 `interrupted`，`pending` 里带上没做完的回填。
+
+还有一层分寸：把「所有强制终止都返回结构化结果」作为应用层规范可以，但不能要求框架内部也这样。Pydantic AI 用异常 `UsageLimitExceeded`，LangGraph 用 `GraphRecursionError`，这是它们的接口约定。你的 Runtime 该做的是在自己的边界上把这两类异常翻译成统一结果，而不是要求框架改行为。
 
 #### 5.7 落地要点与常见误伤
 
 | 要点 | 说明 |
 | :--- | :--- |
-| 动作指纹要归一化 | 参数字典排序、去掉时间戳 / request_id 等易变字段后再 hash，否则同一动作会被判成不同动作，L3 形同虚设 |
+| 动作指纹要归一化 | 参数字典排序、仅去掉不影响语义的追踪字段后再 hash；时间范围和游标等应保留，否则同一动作会被判成不同动作，L3 形同虚设 |
 | 窗口要有界 | 用 `deque(maxlen=N)`；用无限 list 再取尾部，内存会随轮次线性增长，长任务里就是泄漏 |
-| 按轮判重，不按调用判重 | 同一批并行发出的相同调用是合法的；判重单位应该是「这一轮的动作集合」，见 5.3 |
-| 区分「连续」与「累计」 | 连续 N 轮较严格；分页查询等合法重复调用要留白名单或放宽阈值，避免误杀 |
+| 按轮检查动作与观察 | 同一批多个相似调用不等于多轮重复；批次记录保留有意义的顺序与数量 |
+| 区分「连续」与「累计」 | 连续 N 轮检测需结合结果；分页和合法轮询应保留参数语义、间隔与上限 |
 | L3 挡不住交替循环 | A → B → A → B 不会命中「连续相同」，需要窗口内周期检测，或靠 L1 / L4 兜底 |
 | 预算要预留 | 在接近窗口上限前终止，给终止说明和结果摘要留够 Token |
-| 留出收尾预算 | 只设一个最大步数，会在「工具刚执行完」的下一轮入口掐断；要用 `MAX_TRANSITIONS + FINALIZE_RESERVE` 两段预算，见 5.2 |
-| 可观测 | 记录每层触发次数、步数、耗时、Token 曲线，用来反推阈值是否合理 |
+| 留出收尾预算 | 只设一个最大请求数，会在「工具刚执行完」的下一轮入口掐断；要用 `MAX_NORMAL_REQUESTS + FINALIZE_RESERVE` 两段预算 |
+| 可观测 | 记录每层触发次数、轮数、耗时、Token 曲线，用来反推阈值是否合理 |
 
-写进预算还不够，还得**让模型知道时间快到了**。同样剩一次请求，一种做法是直接掐断，用户拿到「任务未完成」；另一种是在这次请求里告诉它「这是最后一次机会，请给出当前最佳答案」，用户拿到一份不完整但可用的结果。差别全在那句提示上。
+写进预算还不够，还得让模型在额度用完之前知道。同样剩一次请求，一种做法是直接掐断，用户拿到「任务未完成」；另一种是在这次请求里告诉它「这是最后一次机会，请给出当前最佳答案」，用户拿到一份不完整但可用的结果。差别全在那句提示上。
 
-**但别指望框架自动帮你做这件事。** Pydantic AI 到了 `request_limit` 会直接抛 `UsageLimitExceeded`，即使模型其实已经把该查的都查完了；官方给的是一个需要自己实现的 capability 范式（见 6.1）。LangGraph 的 `create_react_agent` 曾用 `RemainingSteps` 提前收尾，但这个接口已经弃用。结论很朴素：收尾逻辑要么自己写，要么没有。
+但框架不会自动帮你做这件事。Pydantic AI 到 `request_limit` 直接抛 `UsageLimitExceeded`，即使模型已经把该查的都查完了；LangGraph 的 `create_react_agent` 曾用 `RemainingSteps` 提前收尾，这个接口已经弃用。第六章分别给出这两个框架里的写法。一句话：收尾逻辑要么自己写，要么没有。
 
-#### 5.8 并行、异常、幂等，分别属于哪一层
+#### 5.8 并行、异常与幂等
 
-前面几节防的是「循环停不下来」。这一节回到开头那张层次表，把三个最常被塞进 Loop 的问题各自归位——**混在一起讲，最容易造成的误解是「实现一个 Loop 就得顺手把所有事都做了」**。
+这三件事都发生在工具执行那一侧。Loop 要做的不是把它们各自实现一遍，而是把约定定清楚：哪些调用可以并发、失败该由谁处理、一次副作用凭什么算「同一次」。
 
-| 问题 | 属于哪一层 | 判断依据 |
+| 场景 | 归谁 | 关键约定 |
 | :--- | :--- | :--- |
-| 一次响应多个工具调用 | **Agent Loop** | 它决定「一帧里怎么执行动作」，不处理就是控制流不完整 |
-| 工具异常没分类 | **Agent Runtime** | 它决定「错误怎么反馈给模型」，Loop 本身不关心错误类型 |
-| 超时重试产生重复副作用 | **Agent Infrastructure** | 它涉及外部系统的状态一致性，单机低流量可以蒙过去 |
+| 一次响应多个调用 | Loop | 独立只读可并发，有依赖或有副作用串行；混合时读并发、写串行 |
+| 工具报错 | Runtime | 瞬时错误在执行器里退避，业务错误交回模型改参数；写操作不无差别重试 |
+| 重复写入 | 基础设施 | 第一次执行前保存 `operation_id`，重试沿用；远端按幂等键去重，同键不同参数应当报错 |
 
-##### 一次响应多个工具调用 —— 属于 Loop
+一批三个调用成功两个、失败一个，就把两个结果和一条结构化错误一起回灌，每个结果关联原调用 ID，失败项不计入已完成任务。依赖参数必须来自已经拿到结果，不能因为模型在同一批里提了 A、B，就假设 B 看到了 A 的输出。重复检测也按跨轮轨迹看：一批三个 `read_ticket(INC-2026-1115)` 值得优化，但不是已经循环三轮；次数和顺序有意义时，比较的是序列或多重集合。
 
-模型经常一次返回三个 tool call。Runtime 要决定：并发执行还是串行？部分失败怎么办？
+429 和临时连接问题在执行器里退避；参数错误、资源不存在、权限不足交回模型改参数或停下；凭证失效直接结束并保留进展；写超时或连接断开先记 unknown 再核查。写操作重试一次就可能多一条记录，这一类最容易被「失败就重试」吃掉。
 
-| 策略 | 适用 | 代价 |
-| :--- | :--- | :--- |
-| 全部并发 | 工具之间无依赖、都幂等 | 需要处理部分失败与顺序不确定 |
-| 全部串行 | 有依赖，或有副作用 | 延迟高 |
-| 并发只读、串行写 | 混合场景的稳妥选择 | 实现复杂一点 |
-
-部分失败的语义也要定清楚：三个里成功两个，是整体失败、还是把两个结果和一个错误一起回灌让模型决定？多数情况下后者更好——模型能看到已有进展，不会从头再来一遍。
-
-这也解释了 5.3 里为什么判重必须按「轮」而不是按「调用」：同一批里的三个 `query_order(A1001)` 是并行请求，不是三次重复尝试。
-
-##### 工具异常分类 —— 属于 Runtime
-
-一个工具抛错，Runtime 该重试、该降级、还是该把错误原样告诉模型？这三条路的处理完全不同：
-
-| 错误类型 | 例子 | 处理 |
-| :--- | :--- | :--- |
-| 可重试 | 网络超时、429 限流、锁冲突 | 指数退避重试，有上限 |
-| 不可重试 | 参数校验失败、权限不足、资源不存在 | 包装成 Observation 回灌，让模型自己改参数或换路径 |
-| 致命 | 凭证失效、依赖服务全挂 | 直接终止，不要浪费模型调用 |
-
-把不可重试错误当成可重试来循环，是最常见的浪费；把可重试错误直接抛给模型，会让它误以为「这个工具坏了」，从此绕路。
-
-##### 幂等与副作用 —— 属于 Infrastructure
-
-这是三个里最容易被低估的一个，也最不该被塞进 Loop 里。完整走一遍它的链路：
-
-```text
-Agent 调用 create_order 工具
-       ↓
-订单在服务端已经创建成功
-       ↓
-HTTP 响应超时（或连接断开）
-       ↓
-Agent 认为执行失败
-       ↓
-重试 create_order
-       ↓
-产生重复订单
-```
-
-这段流程里最容易被忽略的一点是：**「失败就重试」这条默认策略，对有副作用的操作是不成立的**。重试之前必须先确认上一次到底有没有成功。三种做法，按代价从低到高：
-
-1. **幂等键**：请求带 `idempotency_key`，由 `run_id` + 工具名 + 规范化参数生成（和 L3 的动作指纹同源），服务端按键去重；
-2. **结果核查**：重试前先查一次「这个操作是不是已经生效」，例如按业务唯一键查订单；
-3. **人工兜底**：无法自动判定的，转人工确认，不要赌。
-
-**为什么它不算 Loop 的职责？** 因为一个单副本、低流量、不重试的循环，完全可以不管这件事而正常工作。它变致命是在有并发、有重试、有多副本之后——那是基础设施要解决的问题。Loop 能做的只有一件事：**把幂等键传下去**，剩下的交给服务端的去重约定。
-
-> **本节小结**：并行是 Loop 的事，异常分类是 Runtime 的事，幂等是基础设施的事。**分清归属，才不会在一个 `while` 里硬写出一套分布式系统。**
+幂等靠的是第一次执行前生成并保存 `operation_id`，重试沿用同一个，新的有意操作换新 ID；不能拿 run_id、工具名和参数拼出身份，用户可能在同一任务里有意追加两条相同评论。动作指纹管发现可疑重复，操作 ID 管识别一次副作用，两者不能合并。远端不支持幂等，就用可查询的操作元数据核查，确认不了保留 unknown 交人工，这跟单机还是多副本无关。
 
 #### 5.9 上线前检查清单
 
-按层次分组。第一组不做，循环就是错的；后两组不做，循环能跑，但会在生产上以别的方式找回来。
+按执行、运行管理和外部副作用分组检查。任意一组的缺口都可能在第一次异常路径中出现。
 
 **Loop 本身**
 
-- [ ] L1 数的是**有效状态推进**次数，不是模型请求次数或工具调用次数
-- [ ] 执行预算与收尾预算分开：`MAX_TRANSITIONS + FINALIZE_RESERVE`，干完活还有一次机会总结
-- [ ] 每轮入口统一检查推进次数、全局 deadline、累计预算
+- [ ] L1 明确按模型请求计数，普通修正计入普通额度；推进数和工具数另行记录
+- [ ] 执行预算与收尾预算分开：`MAX_NORMAL_REQUESTS + FINALIZE_RESERVE`，干完活还有一次机会总结
+- [ ] 请求前检查阶段额度、deadline、取消与累计预算，工具执行前再次核对限制
 - [ ] 单次上下文在**请求发出之前**估算，超了先压缩，压缩后仍超才终止
 - [ ] 全局 deadline 会向下传递到模型请求**和工具执行**，不只在循环入口检查
-- [ ] 重复动作检测按「轮」判重（动作集合），不是按单个调用判重
+- [ ] 重复检测按轮比较动作与观察，保留有意义的顺序和数量
 - [ ] 非最终、非工具调用的响应有明确分支，未知响应显式失败
-- [ ] 只有一份运行状态，`messages` 挂在里面；`persist` 落盘的就是刚更新的那份
+- [ ] 状态有明确权威来源，消息、待办、预算与时间记录能一致恢复
 - [ ] 上下文裁剪之后，`tool_call_id` 仍然成对
 - [ ] 一次响应多个工具调用时，并发策略与部分失败语义已定义
 
@@ -915,24 +872,26 @@ Agent 认为执行失败
 - [ ] 工具异常做了分类：可重试 / 不可重试 / 致命
 - [ ] 终止原因进日志与告警，能区分「正常完成」和「被闸门拦下」
 
-**Infrastructure 层（规模化之前）**
+**外部副作用与一致性**
 
 - [ ] 有副作用的工具都接受幂等键，超时重试前能判断上次是否已生效
 - [ ] 有分页 / 重试等合法重复场景的白名单，避免误杀
-- [ ] 明确哪些能力交给框架、哪些要自己补（见第六章）
+- [ ] 明确哪些能力交给框架、哪些要自己补
 
 **验证**
 
 - [ ] 压测过至少一种人为注入的死循环，确认五层各自都能触发
 - [ ] 人为制造一次「最后一步工具刚跑完」，确认收尾预算能让它输出结论而不是被掐断
 
-> **本节小结**：步数管不收敛，时间管卡死，去重管原地打转，累计预算管成本，上下文上限管窗口——这五层齐了，Loop 才算可控。至于幂等、异常分类、多副本一致性，它们分别落在 Runtime 和基础设施层：**Loop 要做的是把该传的信息传下去，而不是把它们全塞进 `while` 里。**
+检查清单需要配合故障注入验证：重复查询是否提前停，阻塞能否超时，收尾额度是否独立，以及挂起后能否恢复已有操作。职责可以分给不同组件，但 Loop 要能正确调用它们。
 
 ---
 
 ### 六、框架里，这个循环长什么样
 
-前五节讲的都是抽象骨架。落到真实框架上，会发现它们做的是同一件事，只是把「循环」放在了不同的位置：**框架预定义的节点流、Advisor 递归、自己画的有环图**。读一个陌生的 Agent 框架，只要找齐三样东西——状态在哪、循环由谁驱动、上限由谁兜底——基本就能读懂它。
+前面用伪代码拆开了模型请求、工具执行、状态更新和终止判断。使用框架时，这些步骤通常被封装在一次 `run()` 或 `call()` 中，业务代码不需要直接编写循环。
+
+下面分别看 Pydantic AI、Spring AI 和 LangGraph 如何实现这段流程：模型响应由谁处理，工具结果如何进入下一次请求，次数限制和终止判断又放在哪里。把这些位置和前面的代码对应起来，就能看清框架已经提供了哪些能力，以及应用还需要补哪些控制。
 
 #### 6.1 Pydantic AI：把循环显式成节点流
 
@@ -944,7 +903,7 @@ from pydantic_ai import Agent, UsageLimits
 agent = Agent("openai:your-model")
 
 async with agent.iter(
-    "帮我查询订单 A1001 的状态",
+    "读取工单 INC-2026-1115 的摘要",
     usage_limits=UsageLimits(request_limit=12),   # L1：最多 12 轮
 ) as run:
     async for node in run:
@@ -962,21 +921,21 @@ async with agent.iter(
 | `CallToolsNode` | **处理模型响应**：判定继续还是终止、执行工具调用、校验输出、失败时生成重试提示 |
 | `End` | 携带 `FinalResult`，run 结束 |
 
-这里有个容易写错的地方：**`CallToolsNode` 不等于「工具执行节点」**。官方文档的示例问「法国的首都是哪里」，模型只回了一段纯文本，节点序列里**同样有 `CallToolsNode`**，然后才进 `End`。它处理的是「响应」，不是「工具」——没有工具调用时，它做的是输出校验和终止判定。
+这里有个容易写错的地方：`CallToolsNode` 不等于「工具执行节点」。官方文档的示例问「法国的首都是哪里」，模型只回了一段纯文本，节点序列里**同样有 `CallToolsNode`**，然后才进 `End`。它处理的是响应，不是工具。没有工具调用时，它做的是输出校验和终止判定。
 
 所以数轮数要看 `ModelRequestNode` 出现的次数，不要看 `CallToolsNode`。
 
-内置的刹车集中在 `UsageLimits`，覆盖面比想象中宽：
+内置限制主要集中在 `UsageLimits`。下列参数以所用版本为准，接入前最好再核一遍安装版本的文档：
 
-| 参数 | 限制什么 | 对应前面 |
+| 参数 | 限制什么 | 对应哪一层 |
 | :--- | :--- | :--- |
-| `request_limit` | 提交到 run 历史的模型响应数，也就是 Loop 的轮数（默认 50，官方提醒数字会随版本变，别背） | L1 步数 |
+| `request_limit` | 提交到 run 历史的模型响应数，也就是 Loop 的轮数（默认值依版本，项目中显式设置） | L1 请求次数 |
 | `tool_calls_limit` | 成功执行的工具调用次数 | 不直接对应：它限总量，不判重复 |
 | `total_tokens_limit` / `input_tokens_limit` / `output_tokens_limit` | 整个 Run 累计 Token | L4 累计预算 |
 | `cost_limit` | 整个 Run 累计成本（美元） | L4 |
 | `per_request_input_tokens_limit` | **单次请求**的输入 Token 上限 | L5 上下文窗口 |
 
-最后一行是关键：它和 `input_tokens_limit` 不是一回事，前者独立检查每一次请求的输入规模，后者是整个 Run 的累计值——正好对应 5.2 里 L4 与 L5 的区分。设置 `count_tokens_before_request=True` 可以在请求前就拦住超窗调用，否则那次请求仍会被发出并计费。
+最后一行是关键。它和 `input_tokens_limit` 不是一回事：前者独立检查每一次请求的输入规模，后者是整个 Run 的累计值，正好对应 5.2 里 L4 与 L5 的区分。设置 `count_tokens_before_request=True` 可以在请求前就拦住超窗调用，否则那次请求仍会被发出并计费。
 
 超时和取消也不止 `tool_timeout`：
 
@@ -987,14 +946,14 @@ async with agent.iter(
 | `CancellationToken` | 从外部取消，可共享给父子 Agent 整棵树 |
 | `ctx.cancel()` / `AgentRun.cancel()` | 在工具体内或手动驱动 `iter()` 时主动取消 |
 
-所以它实际覆盖的是 **L1、L2、L4、L5 四层**，比「只管工具超时」的印象要完整得多。子 Agent 会继承父 Agent 的 deadline，自己的 `timeout=` 只能缩短不能延长——这就是 5.5 说的「Deadline 向下传递」。
+所以它实际覆盖的是 L1、L2、L4、L5 四层，比「只管工具超时」的印象完整得多。子 Agent 会继承父 Agent 的 deadline，自己的 `timeout=` 只能缩短不能延长，这就是 5.5 说的「Deadline 向下传递」。
 
 还有两个容易踩的细节：
 
 - `request_limit` 数的是 loop 轮数，不是发给供应商的每一次 HTTP 请求；FallbackModel 放弃的尝试和传输层重试不计入，但它们的 Token 和成本仍然计入额度。
-- Token 与成本限制是**响应返回之后**才检查的，越过上限的那次请求已经产生费用——这是「限制」和「省钱」之间的一道缝，靠事前估算或 `count_tokens_before_request=True` 才能补上。
+- Token 与成本限制要到响应返回之后才检查，越过上限的那次请求已经产生费用。这是「限制」和「省钱」之间的一道缝，靠事前估算或 `count_tokens_before_request=True` 才能补上。
 
-**到了 `request_limit` 就是抛异常，它不会自己收尾。** 官方写得很直白：达到上限时 Run 抛 `UsageLimitExceeded`，**即使模型其实已经把该查的都查完了**。想让它「带着已有信息给个结论」，得自己实现一个 capability——在 `before_model_request` 里算还剩几次、把剩余次数告诉模型，最后一次请求把 function tools 摘掉，让它除了输出别无选择。这正好对应 5.2 讲的收尾预算，区别是：在自研循环里它是三行代码，在框架里它得包成一个扩展点。
+到了 `request_limit` 就是抛异常，它不会自己收尾。官方写得很直白：达到上限时 Run 抛 `UsageLimitExceeded`，即使模型其实已经把该查的都查完了。想让它「带着已有信息给个结论」，得自己实现一个 capability：在 `before_model_request` 里算还剩几次、把剩余次数告诉模型，最后一次请求把 function tools 摘掉，只保留输出通道。这正好对应 5.2 讲的收尾预算。区别是，在自研循环里直接控制请求阶段，在框架里得包成一个扩展点。
 
 ```python
 from dataclasses import dataclass
@@ -1045,23 +1004,23 @@ class WrapUpNearRequestLimit(AbstractCapability[Any]):
 
 agent = Agent("openai:your-model", capabilities=[WrapUpNearRequestLimit()])
 result = agent.run_sync(
-    "查一下 A1001 的订单和物流",
+    "分析工单 INC-2026-1115 的日志与代码，给出验证后的方案",
     usage_limits=UsageLimits(request_limit=8),
 )
 ```
 
-四行代码里有四个不能省的细节：
+这个扩展点示例还有几处需要核对：
 
 - **`AbstractCapability[Any]` 要带类型参数**。它是泛型基类，官方示例都写 `[Any]`；省掉在类型检查严格的项目里会报错。
 - **提示要走 `ctx.enqueue(SystemPromptPart(...))`，不能直接改 `request_context.messages`**。后者是「只改这一次发送的内容」，不会进历史；`enqueue` 才会作为一条 `ModelRequest` 进历史，也才会出现在 trace 里。
-- **`scope="request"` 是关键**。默认是 `conversation`，那条提示会一直留在后续请求里；设成 `request` 后，它只对这一次生效——每轮看到的是当前剩余次数，而不是一串过期的「只剩 3 次」。
+- **`scope="request"` 是关键**。默认是 `conversation`，那条提示会一直留在后续请求里；设成 `request` 后，它只对这一次生效：每轮看到的是当前剩余次数，而不是一串过期的「只剩 3 次」。
 - **`prepare_tools` 只摘 function tools**，结构化输出用的 output tool 会保留，所以有 `output_type` 的 Agent 仍然能正常产出结构化结果。
 
-还有一个边界必须说清：**这套收尾策略不保证成功**。官方文档明确写了——如果模型最后一次输出仍然校验失败，已经没有请求留给重试，run 照样抛 `UsageLimitExceeded`。收尾能把「有数据但没总结」的概率压低，压不到零。
+还有一个边界必须说清：**这套收尾策略不保证成功**。官方文档明确写了：如果模型最后一次输出仍然校验失败，已经没有请求留给重试，run 照样抛 `UsageLimitExceeded`。收尾能把「有数据但没总结」的概率压低，压不到零。
 
-**同步工具的「超时」可能只是不再等。** 这条在排障时值钱：用同步 `def` 写的工具跑在工作线程里，超时触发时 Runtime 结束的是「等待结果」这件事，底层线程未必真的被终止——它可能还在跑，甚至稍后把副作用落了盘。所以有副作用的同步工具，光配 `tool_timeout` 不够，仍然要幂等键或执行结果核查（见 5.8 第三小节）。
+同步工具的「超时」可能只是不再等。这条在排障时值钱：用同步 `def` 写的工具跑在工作线程里，超时触发时 Runtime 结束的是「等待结果」这件事，底层线程未必真的被终止。它可能还在跑，甚至稍后把副作用落了盘。所以有副作用的同步工具，光配 `tool_timeout` 不够，仍然要幂等键或执行结果核查，跟前面幂等那节的约定是同一条。
 
-另外，官方并未提供开箱的动作去重，**L3 重复检测仍需业务层自己补**——这正是第五章那套分层不能省的原因。
+另外，官方并未提供开箱的动作去重，L3 重复检测仍需业务层自己补，所以那套分层防护，用了框架也省不掉。
 
 #### 6.2 Spring AI 2.0：把循环放进 Advisor 链
 
@@ -1070,8 +1029,8 @@ result = agent.run_sync(
 ```java
 // 有工具时 ToolCallingAdvisor 自动驱动循环，无需手写 while
 String answer = chatClient.prompt()
-    .user("帮我查一下订单 A1001 的状态")
-    .tools(orderTools)
+    .user("读取工单 INC-2026-1115 的摘要")
+    .tools(ticketTools)
     .call()
     .content();
 
@@ -1080,17 +1039,17 @@ String answer = chatClient.prompt()
 // 再自行检查 chatResponse.hasToolCalls() 并用 ToolCallingManager 驱动
 ```
 
-默认循环条件可以在 `ToolCallingAdvisor.Builder` 上替换，其默认判定就是 `chatResponse -> chatResponse != null && chatResponse.hasToolCalls()`——和前面 4.1 那行 `if response.tool_calls` 是同一句话，也一样带着 4.1 说的那个隐含前提。
+默认循环条件可以在 `ToolCallingAdvisor.Builder` 上替换，其默认判定就是 `chatResponse -> chatResponse != null && chatResponse.hasToolCalls()`，和 4.1 那行 `if response.tool_calls` 是同一句话，也一样带着 4.1 说的那个隐含前提。
 
 三个和 Loop 直接相关的设计：
 
-**`returnDirect` 是一次显式跳出，但有多工具例外。** `@Tool(returnDirect = true)` 让工具结果直接返回调用方、不回灌模型。但如果模型**一次请求了多个工具**，只有全部工具都标了 `returnDirect = true`，才会真的直接返回；只要有一个没标，结果仍然会回灌、循环继续。这是个很容易在联调时困惑的行为。
+`returnDirect` 是一次显式跳出，但有多工具例外。`@Tool(returnDirect = true)` 让工具结果直接返回调用方，不回灌模型。但如果模型**一次请求了多个工具**，只有全部工具都标了 `returnDirect = true`，才会真的直接返回；只要有一个没标，结果仍然会回灌、循环继续。这是个很容易在联调时困惑的行为。
 
-**Advisor 顺序决定观测粒度。** 放在 loop 外只看得到首尾（memory 默认如此），放进 loop 内才能逐轮看到完整的工具请求与响应——这就是 5.7 说的「可观测」。
+**Advisor 顺序决定观测粒度。** 放在 loop 外只看得到首尾（memory 默认如此），放进 loop 内才能逐轮看到完整的工具请求与响应，这就是 5.7 说的「可观测」。
 
 **循环本身不计数，但工具调用有额度。** 这是最容易说岔的一处，得拆成两句话讲。
 
-`ToolCallingAdvisor` 的 `adviseCall` 是一个「调用模型 → 有工具就执行 → 再调用」的循环，官方 API 里**确实没有「最多跑几轮」这个参数**——所以按**轮**计的 L1 要自己补，在 `ToolCallingManager` 外层包一层计轮次即可。
+`ToolCallingAdvisor` 的 `adviseCall` 是一个「调用模型 → 有工具就执行 → 再调用」的循环，官方 API 里确实没有「最多跑几轮」这个参数。模型请求额度应在模型请求边界统计，不能只包住工具执行器；没有工具调用的修正路径也要计入。
 
 但它也**不是「完全没有限制」**。`DefaultToolCallingManager` 管着另一套额度：
 
@@ -1101,48 +1060,105 @@ String answer = chatClient.prompt()
 | `spring.ai.tools.limits.max-total-tool-calls` | 单轮中跨**所有工具**的最大调用次数 | 150 |
 | `spring.ai.tools.limits.on-limit-exceeded` | 超限行为：`THROW` 或 `RETURN_ERROR_RESPONSE` | `THROW` |
 
-超限时抛 `ToolCallLimitExceededException`，异常里**带着 `ToolExecutionResult` 的部分结果**，已执行的调用不会被丢弃；`ToolCallingAdvisor` 会捕获它并作为最终响应返回，`finish_reason` 是 `ToolCallLimitExceededException.FINISH_REASON`。选 `RETURN_ERROR_RESPONSE` 则不中断循环，而是合成一条错误 `ToolResponse` 回灌给模型，让它自己收敛——后者更温和，但也意味着你需要别的闸门来兜底。
+超限时抛 `ToolCallLimitExceededException`，异常里**带着 `ToolExecutionResult` 的部分结果**，已执行的调用不会被丢弃；`ToolCallingAdvisor` 会捕获它并作为最终响应返回，`finish_reason` 是 `ToolCallLimitExceededException.FINISH_REASON`。选 `RETURN_ERROR_RESPONSE` 则不中断循环，而是合成一条错误 `ToolResponse` 回灌给模型，让它自己收敛，后者更温和，但也意味着你需要别的闸门来兜底。
 
-这里有个必须分清的差别：**工具调用次数不等于模型请求次数。** 一轮里模型可以合法地发 5 个工具调用，也可以 5 轮里只发 1 个。所以这套额度能挡住「原地打转」，挡不住「每轮只发一个、却跑了 50 轮」——后者仍然要自己加轮数上限。L3、L4、L5 同理。
+这里有个必须分清的差别：**工具调用次数不等于模型请求次数。** 一轮里模型可以合法地发 5 个工具调用，也可以 5 轮里只发 1 个。所以这套额度能限制单轮中大量请求工具，挡不住「每轮只发一个、却跑了 50 轮」，后者仍然要自己加轮数上限。L3、L4、L5 也不能由这套工具额度替代。
 
 还有一个迁移细节：照着 1.x 教程写 `internalToolExecutionEnabled(false)` 在 2.0 已经编译不过，要换成关闭自动注册或直接调 `ChatModel`。
 
 #### 6.3 LangChain / LangGraph：用有环图表达迭代
 
-先澄清一个容易混的点：**Graph 和 Loop 不是一回事，也不在同一层**。
+前面的例子把循环写在 `while` 里。LangGraph 可以把同一段流程拆成节点，再通过边决定下一步执行哪个节点。模型调用和工具执行各占一个节点，工具执行后回到模型节点，就能继续下一轮。
 
-| | Graph（图 / 编排模型） | Loop（循环 / 控制流行为） |
-| :--- | :--- | :--- |
-| 回答的问题 | 有哪些节点、状态怎么在节点间流动、谁先谁后 | 同一段流程要不要再跑一次、跑到什么时候 |
-| 是否必须有环 | 不一定；DAG 也是图，每个节点只跑一次 | 必须有回边或重复执行，并配上终止条件 |
-| LangGraph 里对应 | `StateGraph`、节点、边、状态、checkpointer、super-step 调度 | 图里存在 `tools → agent` 回边，且条件边能路由到 `END` |
+LangChain 的 `create_agent` 提供较高层的 Agent 接口，底层基于 LangGraph 运行。如果需要自己控制节点、路由和状态，可以直接使用 LangGraph 的 `StateGraph`。下面用后一种方式展开，看看循环具体放在哪里。
 
-有个流传很广的说法是「LangGraph 就是给 DAG 加了一条回边」。这个说法抓到了直觉，但低估了它的定位。更准确的理解是：**LangGraph 是底层的、有状态的编排 Runtime**——它提供共享状态、确定性节点与模型驱动节点、分支与循环、持久化（checkpointer）、人工介入（interrupt）。循环只是它支持的一种拓扑，不是它的全部。
+##### 先把循环画出来
 
-对应地，「LangChain 的链是有向无环图，节点只能走一遍」这句话也要收一收。LangChain 早期的 LCEL 组合确实是管道式的无环结构，但现在的分工是：LangChain 提供 Agent 层抽象（`create_agent`、中间件），LangGraph 提供底层的图执行运行时。两者不是「DAG 与有环图」的简单对立。
+对于工单排查，最简单的工具调用流程是：
 
-回到循环本身。旧版 `AgentExecutor` 是最直白的实现：一个显式 `while`，`AgentAction` → 执行工具 → `Observation` 回灌 → 直到 `AgentFinish`，`max_iterations` 和 `max_execution_time` 兜底。它已废弃。LangGraph 不再把循环写成一段 `while`，而是让你把迭代表达成图拓扑：
+```text
+START → agent（请求模型）
+          ├── 有工具调用 → tools（执行工具）→ agent
+          └── 无工具调用 → END
+```
+
+这里实际只有两个业务节点：`agent` 和 `tools`。`agent` 的响应决定走向工具还是结束；`tools` 把结果写回状态后，再回到 `agent`。
+
+代码可以写成下面这样。假设 `model` 是已经配置好的 LangChain 聊天模型，`tools` 是已定义的工单查询、日志查询等工具：
 
 ```python
-from langgraph.graph import StateGraph, MessagesState, START
+from langgraph.graph import StateGraph, MessagesState, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
+
+model_with_tools = model.bind_tools(tools)
+
+
+def call_model(state: MessagesState):
+    response = model_with_tools.invoke(state["messages"])
+    return {"messages": [response]}
+
 
 builder = StateGraph(MessagesState)
 builder.add_node("agent", call_model)
 builder.add_node("tools", ToolNode(tools))
 builder.add_edge(START, "agent")
-builder.add_conditional_edges("agent", tools_condition)  # 终止判定：有 tool_calls → tools，否则 END
-builder.add_edge("tools", "agent")                       # 回边：让图成为有环图，迭代由此产生
+builder.add_conditional_edges(
+    "agent",
+    tools_condition,
+    {"tools": "tools", "__end__": END},
+)
+builder.add_edge("tools", "agent")
 graph = builder.compile()
 ```
 
-`tools_condition` 承担终止判断，`add_edge("tools", "agent")` 这条回边承担「结果回灌后再请求模型」。**两者合起来才是完整的 Loop**：缺了前者是死循环，缺了后者只是一条直线。状态放在 `MessagesState` 里由框架在节点间传递；`ToolNode` 会把工具结果组装成带 `tool_call_id` 的 `ToolMessage` 加回状态——就是 1.3 说的那套协议。
+`tools_condition` 检查最后一条模型消息：有工具调用就路由到 `tools`，否则路由到 `END`。`tools → agent` 这条边负责在执行后重新请求模型。原来 `while` 中的判断和 `continue`，在这里分别由条件边和回边表达。
 
-`recursion_limit` 限制的是 **super-step 数量**，不是递归深度，也不等于 Agent 轮数。这个区别在复杂图里会放大：一次模型请求 + 一次工具执行，可能跨好几个 super-step；如果图里还有并行分支、条件路由和子图，super-step 和「模型被调用了几次」就更没有固定比例。
+图本身不要求有环，也可以表达固定顺序的工作流。这里由于工具节点会回到模型节点，才形成了重复执行的路径。LangGraph 还提供状态、调度和持久化等能力，循环只是其中一种用法。
 
-所以它的定位要说准：**这是图执行层的安全保护，不是业务层的迭代预算。** 想限「最多几轮」，得自己数 `ModelRequestNode` 的进入次数（或用 6.1 那种 capability），不能指望这个参数。默认值在不同版本间差异较大，以所用版本文档为准，超限抛 `GraphRecursionError`。排查死循环时，`stream_mode="updates"` / `"debug"` 可以逐节点看状态变化——对应 5.7 的可观测要求。
+##### 一轮执行时，消息怎么变化
 
-**一个必须注意的版本变化**：`create_react_agent`（`langgraph.prebuilt`）在 LangGraph v1 已标记弃用，官方建议迁移到 `langchain.agents.create_agent`——它运行在 LangGraph 之上，并提供了中间件系统。上面的 `StateGraph` 示例不受影响（自己画图不会弃用），但如果你在旧教程里看到 `create_react_agent`，要知道它已经是历史接口。它曾经用 `RemainingSteps` 做的「临近上限时提前收尾」，在 `create_agent` 里由中间件机制承担。
+`MessagesState` 中的 `messages` 配置了消息合并规则。上面 `call_model` 返回的是本节点新增的消息，框架负责把它合并进已有历史；节点不需要每次返回完整对话。
+
+以查询日志为例，状态会经过下面的变化：
+
+```text
+进入 agent：
+  User：分析工单 INC-2026-1115，相关 trace 为 tr-7f3a
+
+agent 返回后：
+  User：……
+  Assistant：tool_calls=[search_logs(trace_id="tr-7f3a")]
+
+tools 返回后：
+  User：……
+  Assistant：tool_calls=[……]
+  Tool：TypeError，report_service.py:42，revision=a13c9e7
+
+再次进入 agent：
+  模型读取日志结果，可能请求读取对应版本的代码
+```
+
+`ToolNode` 根据模型消息执行工具，并生成关联原调用 ID 的 `ToolMessage`。这些结果合并进状态后，回边使 `call_model` 再次执行。工具结果因此进入下一次模型输入。
+
+这个示例仍然沿用前面那个简化约定：没有工具调用就结束。如果还需要校验诊断结果、检查工单是否成功回填，就要在模型节点或额外节点中增加判断，并使用自己的路由函数。`tools_condition` 本身不检查业务目标是否完成。
+
+##### 图执行上限与模型请求额度
+
+LangGraph 的 `recursion_limit` 约束图执行的 super-step 数量。super-step 可以理解为图调度的一轮，同一轮中可能执行多个并行节点。
+
+在上面这个简单图里，一次模型执行和一次工具节点执行分别占用调度步骤；增加验证节点、并行分支或子图后，图步数与模型调用次数的关系还会变化。因此，不能把 `recursion_limit=20` 直接解释成「最多请求模型二十次」。
+
+如果业务要求「普通请求最多八次，再留一次收尾」，应在模型请求处记录阶段和次数，按前面那套计数规则切换工具及路由。`recursion_limit` 继续作为图执行层的上限，超限时抛出 `GraphRecursionError`。图的默认上限按所用版本核对，应用边界负责把异常转换成带进展的运行结果。
+
+排查时可以使用 `stream_mode="updates"` 查看节点更新，或按版本支持的调试流查看执行事件。重点看模型节点是否重复进入、工具结果是否进入状态，以及条件边实际选择了哪条路径。
+
+##### 等审批时如何恢复
+
+在工单案例中，可以在回填工具执行前设置审批节点。配合 checkpointer 保存图状态，节点通过 `interrupt` 等待审批；审批事件到达后，用同一个 thread 标识恢复执行。
+
+需要注意，恢复时节点中的部分代码可能重新执行。待回填内容、审批对应的参数版本和稳定操作 ID 应在副作用之前保存；外部工单写入仍要遵守前面那套幂等与核查约定。图保存了执行位置，不等于远端评论一定没有写入过。
+
+旧教程里可能还会看到 `AgentExecutor` 或 `langgraph.prebuilt.create_react_agent`。前者把动作、Observation 和结束判断封装在执行器中；后者是预构建 Agent 接口。新版本通常使用 `langchain.agents.create_agent`，具体迁移按安装版本核对。上面手动构建的 `StateGraph` 用来说明节点和边如何组成 Loop，不依赖这两个旧入口。
 
 #### 6.4 横向对照
 
@@ -1152,55 +1168,46 @@ graph = builder.compile()
 | Spring AI 2.0 | `ToolCallingAdvisor` 递归调用 | loop 内的会话历史 | 响应无 tool calls；`returnDirect` 直接返回 | 无内置，业务层自己做 | 工具调用额度（单工具 40 / 总量 150）；**轮数上限需自建** | 关闭自动注册或直连 `ChatModel` |
 | LangGraph | 有环 `StateGraph` 的回边（Pregel super-step 调度） | `State` / `MessagesState` + checkpointer | 条件边路由到 `END` | 原生（checkpointer + `interrupt`） | 图执行层兜底（`recursion_limit` 数 super-step，**不等于** Agent 轮数） | 自定义边即可 |
 
-三家的差异在表里很明显：Pydantic AI 把限制做成了一等公民，Spring AI 把循环藏在 Advisor 里、只给工具调用额度，LangGraph 把循环交给图拓扑、只给一个图执行上限。**没有一个框架替你解决全部五层**，尤其 L3 重复检测和全局 deadline，三家都需要业务层补。挂起能力也一样：只有 LangGraph 把 checkpointer + interrupt 做成核心概念，另两家要么靠版本特性、要么全靠自己。
+从表中可以看到，各框架在额度、工具执行和图调度上暴露的控制点不同。Pydantic AI 提供 usage 和 run 时间限制，Spring AI 需要区分工具额度与请求次数，LangGraph 需要区分图步数与模型请求次数。L3 的业务进展判断通常仍需应用定义。挂起和恢复能力也要结合所选版本、检查点后端及业务状态设计。
 
-#### 6.5 小结
+#### 6.5 三种表达，一个循环
 
-三种表达，一张图：状态 + 一帧 + 终止条件。差别只在「循环由谁表达」——框架预定义的节点流、Advisor 递归、你自己画的有环图。这里还有个用词陷阱：Pydantic AI 和 LangGraph 都叫 graph，但前者是框架内部预定义好的执行图、你只能观察节点，后者拓扑由你画边决定、环也是你引入的；**两者都不意味着「图等于循环」**。
+三家都在实现同一个东西：状态、一帧、终止条件。差别只在循环由谁表达，是框架预定义的节点流、Advisor 递归，还是你自己画的有环图。这里有个用词陷阱：Pydantic AI 和 LangGraph 都叫 graph，但前者在常规 Agent 用法中使用内部预定义图，也可以手动推进节点；后者拓扑由你画边决定，环也是你引入的。两者都不意味着「图等于循环」。
 
-框架能帮你的是「循环怎么跑」，帮不了的是「循环什么时候必须停」——后者永远取决于你的业务阈值。所以第五章那套分层，用了框架也照样要设计一遍。
+框架能帮你解决循环怎么跑，帮不了循环什么时候必须停。后者取决于你的业务阈值。所以前面那套分层防护，用了框架也照样得自己设计一遍。
 
-再往上收一层看：这三家解决的都只是 **Loop 层**的问题。状态怎么持久化、多副本怎么一致、幂等怎么保证，它们要么不管，要么只给一个钩子——那属于 Runtime 和基础设施层，不在「一个循环怎么转」的范畴里。**用框架不等于买了整套能力，看清它管到哪一层，比记住它有多少 API 更重要。**
+这些框架也会提供持久化、恢复、超时等运行能力，覆盖范围依版本和配置而定。外部写入的一致性与幂等保证仍需结合工具和远端接口设计。看清恢复时哪些代码会重执行，比单独比较 API 数量更有帮助。
 
 ---
 
 ### 结语
 
-把整篇笔记压成一句话：**LLM 提出决策，Runtime 校验并执行，状态承载进展，终止条件负责叫停。**
+从最小 while 到框架里的节点流、Advisor 和状态图，循环都需要维护当前状态，处理模型响应，并把动作结果带到下一次请求中。保留这些实现细节，是为了遇到异常时能定位到具体环节。
 
-这四件事里，只有最后一件是 Agent Loop 自己要回答的——**继续，还是停**。其余三件都是它调用别人的结果。所以看一个循环写得好不好，其实只需要问四个问题：
+工单案例里，日志告诉我们读哪个版本的代码，接口约定决定修复方向，验证结果决定可以交付哪些结论。请求额度和时间限制管住执行范围，待办、审批与操作 ID 则保证恢复时有依据。
 
-1. **状态有几个来源？** 两个以上，早晚会出现「消息更新了、状态没更新」，恢复时丢掉最后一轮。
-2. **闸门装在动作之前还是之后？** 装在之后，都是事后追认：请求已经发出、工具已经跑完、钱已经花了。
-3. **预算是几段？** 只有一段，干完活的那一刻就交不出答案；要拆成「执行」和「收尾」两段。
-4. **它允不允许「等」？** 不允许，「审批三小时」就会变成「重跑三小时」。
+实现时可以分别检查：调用与结果是否配对，响应是否校验，普通与收尾额度是否分开，断点是否包含完整执行位置，以及写入结果未知时能否核查。正常路径跑通之后，再注入重复查询、格式修正和进程退出，才容易发现这些缺口。
 
-这四个问题不需要框架知识，也不需要读源码，看一遍 `while` 就能答出来。
-
-至于 `messages` 之外的那些东西——计划、预算、审批、子任务、幂等、多副本——它们是真实存在的，但**它们属于 Runtime 和基础设施，不属于这个循环本身**。把界线划清楚有两个好处：写循环时不会过度设计，读框架时也不会被 API 数量唬住。
-
-ReAct、Planning、Reflection 换的是「谁在什么时候做决定」；Tool Calling 只是触发下一轮的一类事件；五层防护加一段收尾预算，解决的是「万一它停不下来」。想清楚这几件事，再看 Pydantic AI 的节点流、Spring AI 的 Advisor 链、LangGraph 的有环状态图，都只是在给同一个循环换外壳——找状态、找条件、找上限，三分钟就能看懂它的骨架。
-
-下一次写 `while True` 之前，先花一分钟回答那四个问题——这一分钟通常比事后查线上死循环便宜得多。
+笔者的体会是，先把「什么情况下必须停、停下来交回什么」想清楚，再回头写那个 `while`，比先跑起来再补闸门要省事得多。
 
 ---
 
 ### 附：参考资料与版本说明
 
-官方文档（核对时间：2026 年 11 月）：
+官方参考入口（核对时间 2026 年 11 月）：
 
-- Pydantic AI — Agents / Usage Limits（`request_limit` 默认值、`per_request_input_tokens_limit`、收尾 capability 范式）：`https://pydantic.dev/docs/ai/core-concepts/agents/`
-- Spring AI 2.0 — Tool Calling（`ToolCallingAdvisor`、`ToolCallingManager`、`returnDirect`）：`https://docs.spring.io/spring-ai/reference/api/tools.html`
-- Spring AI 2.0 — Advisors（`toolCallingAdvisorAutoRegister`）：`https://docs.spring.io/spring-ai/reference/api/advisors.html`
+- Pydantic AI — Agents / Usage Limits（`request_limit` 默认值、`per_request_input_tokens_limit`、收尾 capability 范式）：[Agents / Usage](https://ai.pydantic.dev/agents/)
+- Spring AI 2.0 — Tool Calling（`ToolCallingAdvisor`、`ToolCallingManager`、`returnDirect`）：[官方资料](https://docs.spring.io/spring-ai/reference/api/tools.html)
+- Spring AI 2.0 — Advisors（`toolCallingAdvisorAutoRegister`）：[官方资料](https://docs.spring.io/spring-ai/reference/api/advisors.html)
 - Spring AI — Tool Call Limits（`spring.ai.tools.limits.*`、`ToolCallLimitExceededException`）：同上 tools 文档的「工具调用限制」小节
-- Pydantic AI — Building Custom Capabilities（`AbstractCapability`、`ctx.enqueue`、`prepare_tools`、`wrap_node_run`）：`https://pydantic.dev/docs/ai/capabilities/custom`
-- LangGraph — Graph API 与递归限制：`https://docs.langchain.com/oss/python/langgraph/use-graph-api`
+- Pydantic AI — Building Custom Capabilities（`AbstractCapability`、`ctx.enqueue`、`prepare_tools`、`wrap_node_run`）：[Custom Capabilities](https://ai.pydantic.dev/capabilities/custom)
+- LangGraph — Graph API 与递归限制：[官方资料](https://docs.langchain.com/oss/python/langgraph/use-graph-api)
 
 **几处已知会随版本变化的地方**，正文里都标了「以版本为准」，落地前请再核一遍：
 
 | 事项 | 变化情况 |
 | :--- | :--- |
-| Pydantic AI `request_limit` 默认值 | 当前为 50；官方明确提醒数字会变，建议从异常信息里读，不要背常量 |
+| Pydantic AI `request_limit` 默认值 | 所引版本为 50；项目里建议显式设置，并按安装版本核对 |
 | Pydantic AI 达到 `request_limit` 的行为 | 抛 `UsageLimitExceeded`，不自动收尾；收尾要自己写 capability |
 | Spring AI 的循环位置 | 1.x 在各 `ChatModel` 内，2.0 起统一到 `ToolCallingAdvisor`，`internalToolExecutionEnabled` 已移除 |
 | Spring AI Advisor 参数名 | 2.x 期间仍在调整，如 `toolCallingAdvisorAutoRegister` |
